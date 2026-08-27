@@ -1,0 +1,8 @@
+.ipynb_checkpoints/
+__pycache__/
+data/
+extract/
+request_samples/
+uploaded_files/
+
+worker.log

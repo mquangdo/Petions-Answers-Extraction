@@ -1,0 +1,9 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+httpx>=0.27
+pydantic>=2.6
+python-multipart>=0.0.9  # Bắt buộc cho multipart/form-data (UploadFile/Form)
+celery[amqp]>=5.3
+sqlalchemy>=2.0       # ORM nối PostgreSQL (lưu job/status/result)
+psycopg2-binary>=2.9  # Driver PostgreSQL cho SQLAlchemy
+markdown-it-py>=3.0   # Parser markdown chuẩn (strip_markdown: plain text <-> markdown)
