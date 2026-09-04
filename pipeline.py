@@ -26,6 +26,7 @@ import unicodedata
 import httpx
 
 from functions import extract_petitions, extract_metadata
+from postprocess import _fix_ocr_diacritics, clean_footer
 
 
 OCR_URL = "https://8078--main--dev--sinhnq3.coder.vts-ai.space/step1/ocr"
@@ -125,6 +126,9 @@ async def _ocr_extract_one(
     """OCR 1 file (giới hạn concurrency), extract petitions + metadata."""
     async with semaphore:
         md_text = await _ocr_pdf_async(filename, pdf_bytes, client)
+    # Post-OCR làm sạch trước khi trích xuất (OCR bóc footer/chú thích vào nội dung)
+    md_text = _fix_ocr_diacritics(md_text)
+    md_text = clean_footer(md_text)
     return {
         "petitions": extract_petitions(md_text),
         "metadata": extract_metadata(md_text),

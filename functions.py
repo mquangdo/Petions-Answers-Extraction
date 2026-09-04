@@ -12,7 +12,8 @@ from regexes import (
     _S2_RE,
     _SO_CONG_VAN_RE,
     _NGAY_BAN_HANH_RE,
-    _NGUOI_KY_RE
+    _NGUOI_KY_RE,
+    _TRACH_NHIEM_RE,
 )
 
 
@@ -219,7 +220,8 @@ def _extract_standard(md_text: str) -> list:
     group_pos = [i for i, line in enumerate(lines) if _GROUP_RE.match(line)]
     end_pos = [i for i, line in enumerate(lines) if _END_RE.match(line)]
     closing_pos = [i for i, line in enumerate(lines) if _CLOSING_RE.search(line)]
-    stops = sorted(set(group_pos + s1_eff + s2_pos + end_pos + closing_pos))
+    trach_nhiem_pos = [i for i, line in enumerate(lines) if _TRACH_NHIEM_RE.match(line)]
+    stops = sorted(set(group_pos + s1_eff + s2_pos + end_pos + closing_pos + trach_nhiem_pos))
 
     petitions = []
     for j in s2_pos:
@@ -258,7 +260,8 @@ def _extract_f3(md_text: str) -> list:
     group_pos = [i for i, line in enumerate(lines) if _GROUP_RE.match(line)]
     end_pos = [i for i, line in enumerate(lines) if _END_RE.match(line)]
     closing_pos = [i for i, line in enumerate(lines) if _CLOSING_RE.search(line)]
-    stops = sorted(set(group_pos + s1_eff + s2_pos + end_pos + closing_pos))
+    trach_nhiem_pos = [i for i, line in enumerate(lines) if _TRACH_NHIEM_RE.match(line)]
+    stops = sorted(set(group_pos + s1_eff + s2_pos + end_pos + closing_pos + trach_nhiem_pos))
 
     petitions = []
     for j in s2_pos:
@@ -293,31 +296,14 @@ def _extract_f3(md_text: str) -> list:
     return petitions
 
 
-# Ký tự OCR sinh sai: "e/o + MACRON + ACUTE" thay vì "e/o + CIRCUMFLEX + ACUTE"
-# (vd OCR viết "Kḗt quả" thay vì "Kết quả" -> phá regex _S2_RE).
-# LƯU Ý: KHÔNG được map ộ(U+1ED9)->ô: "Nội/Hà Nội" đúng chính tả dùng ộ,
-# đổi thành ô sẽ hỏng text ("Hà Nội" -> "Hà Nôi") và phá regex metadata.
-_OCR_DIACRITICS_MAP = {
-    "\u1E17": "\u1EBF",  # ḗ (e+macron+acute) -> ế (e+circumflex+acute)
-    "\u1E16": "\u1EBE",  # Ḗ (E+macron+acute) -> Ế (E+circumflex+acute)
-    "\u1E53": "\u1ED1",  # ṓ (o+macron+acute) -> ố (o+circumflex+acute)
-    "\u1E52": "\u1ED0",  # Ṓ (O+macron+acute) -> Ố (O+circumflex+acute)
-}
-
-
-def _fix_ocr_diacritics(text: str) -> str:
-    """Chuẩn hóa ký tự tiếng Việt mà OCR sinh sai về dạng chuẩn."""
-    for bad, good in _OCR_DIACRITICS_MAP.items():
-        text = text.replace(bad, good)
-    return text
-
-
 def extract_petitions(md_text: str) -> list:
     """
     Router: xác định format của file rồi route đến handler tương ứng.
     Trả về danh sách petition {"noi_dung", "tra_loi"}.
+
+    LƯU Ý: text đầu vào phải là markdown đã qua post-OCR
+    (postprocess.clean_footer + _fix_ocr_diacritics) — do bước OCR đảm nhận.
     """
-    md_text = _fix_ocr_diacritics(md_text)
     fmt = classify_format(md_text)
     if fmt == "f1":
         return _extract_f1(md_text)
@@ -328,22 +314,26 @@ def extract_petitions(md_text: str) -> list:
     return []
 
 def extract_metadata(md_text: str) -> dict:
-    """Trích xuất metadata từ markdown OCR: so_cong_van, ngay_ban_hanh, nguoi_ky."""
-    # Chuẩn hóa ký tự OCR sai trước khi trích xuất
-    md_text = _fix_ocr_diacritics(md_text)
+    """Trích xuất metadata từ markdown OCR: so_cong_van, ngay_ban_hanh, nguoi_ky.
 
+    LƯU Ý: text đầu vào phải là markdown đã qua post-OCR
+    (postprocess.clean_footer + _fix_ocr_diacritics) — do bước OCR đảm nhận.
+    """
     result = {"so_cong_van": None, "ngay_ban_hanh": None, "nguoi_ky": None}
 
     # 1. Số công văn: tìm dòng "Số: ..."
     m = _SO_CONG_VAN_RE.search(md_text)
     if m:
-        result["so_cong_van"] = m.group(1).strip()
+        # Loại bỏ markdown bold (**) và MỌI khoảng trắng; giữ nguyên nếu chỉ có suffix
+        val = re.sub(r"\*+", "", m.group(1))
+        val = re.sub(r"\s+", "", val)
+        result["so_cong_van"] = val
 
-    # 2. Ngày ban hành: "Hà Nội, ngày DD tháng MM năm YYYY" (MM có thể bị OCR mất)
+    # 2. Ngày ban hành: "Hà Nội, ngày DD tháng MM năm YYYY" (phải đủ ngày + tháng)
     m = _NGAY_BAN_HANH_RE.search(md_text)
     if m:
         day, month, year = m.groups()
-        if month:
+        if day and month:
             result["ngay_ban_hanh"] = f"{int(day):02d}/{int(month):02d}/{year}"
 
     # 3. Người ký: chỉ tìm trong 40 dòng CUỐI (vùng chữ ký), tránh bắt nhầm

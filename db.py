@@ -107,12 +107,20 @@ def get_job(job_id: str) -> dict | None:
 # ---------------------------------------------------------------------------
 
 def get_cached_result(cache_key: str) -> dict | None:
-    """Trả result đã cache theo cache_key, hoặc None nếu cache miss."""
-    with SessionLocal() as session:
-        row = session.get(ResultCache, cache_key)
-        if row is None:
-            return None
-        return dict(row.result)
+    """
+    Trả result đã cache theo cache_key, hoặc None nếu cache miss.
+    Lỗi truy vấn (DB tạm thời không nối được) -> coi như cache miss,
+    job vẫn chạy pipeline bình thường thay vì chết 500.
+    """
+    try:
+        with SessionLocal() as session:
+            row = session.get(ResultCache, cache_key)
+            if row is None:
+                return None
+            return dict(row.result)
+    except Exception as e:
+        print(f"[cache] Không thể đọc cache {cache_key[:12]}...: {e}")
+        return None
 
 
 def put_cached_result(cache_key: str, data_list: list[dict], result: dict) -> None:

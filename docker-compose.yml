@@ -46,6 +46,6 @@ services:
       - postgres_jobs_data:/var/lib/postgresql
       
 volumes:
-  minio_petitions_data:
+  # minio_petitions_data:
   postgres_jobs_data:
   file_store:

@@ -54,7 +54,7 @@ from tasks import process_answer_matching
 # Configuration
 # ============================================================
 
-MAX_FILE_SIZE_MB = int(os.environ.get("MAX_FILE_SIZE_MB", "30"))
+MAX_FILE_SIZE_MB = int(os.environ.get("MAX_FILE_SIZE_MB", "50"))
 MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024
 FILE_STORE_DIR = os.environ.get("FILE_STORE_DIR", "./uploaded_files")
 

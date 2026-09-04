@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 Các hàm postprocess áp dụng lên kết quả trích xuất kiến nghị.
 
@@ -8,12 +8,95 @@ Các hàm postprocess áp dụng lên kết quả trích xuất kiến nghị.
   (raw section lines).
 - Field "noi_dung": làm sạch dấu thừa bám quanh text (dấu ngoặc kép/trích dẫn
   bao quanh, ký tự italic "_" còn sót của markdown).
+- Post-OCR (sau bước OCR, trước khi lưu .md / trước khi trích xuất):
+    - _fix_ocr_diacritics: chuẩn hóa ký tự tiếng Việt mà OCR sinh sai.
+    - clean_footer: loại bỏ chú thích cuối trang (footnote) mà OCR bóc vào
+      giữa nội dung.
 """
 
 import re
 
+from regexes import _FOOTNOTE_LINE_RE, _SUP_REF_RE
+
 _SENTENCE_END = ".!?;:"
 _OPEN_PREFIX = "(_\"' "
+
+
+# ---------------------------------------------------------------------------
+# Post-process SAU bước OCR (áp dụng lên nguyên file markdown thô của OCR),
+# để extract_petitions/extract_metadata chỉ làm đúng việc trích xuất.
+# ---------------------------------------------------------------------------
+
+# Ký tự OCR sinh sai: "e/o + MACRON + ACUTE" thay vì "e/o + CIRCUMFLEX + ACUTE"
+# (vd OCR viết "Kḗt quả" thay vì "Kết quả" -> phá regex _S2_RE).
+# LƯU Ý: KHÔNG được map ộ(U+1ED9)->ô: "Nội/Hà Nội" đúng chính tả dùng ộ,
+# đổi thành ô sẽ hỏng text ("Hà Nội" -> "Hà Nôi") và phá regex metadata.
+_OCR_DIACRITICS_MAP = {
+    "\u1E17": "\u1EBF",  # ḗ (e+macron+acute) -> ế (e+circumflex+acute)
+    "\u1E16": "\u1EBE",  # Ḗ (E+macron+acute) -> Ế (E+circumflex+acute)
+    "\u1E53": "\u1ED1",  # ṓ (o+macron+acute) -> ố (o+circumflex+acute)
+    "\u1E52": "\u1ED0",  # Ṓ (O+macron+acute) -> Ố (O+circumflex+acute)
+}
+
+
+def _fix_ocr_diacritics(text: str) -> str:
+    """Chuẩn hóa ký tự tiếng Việt mà OCR sinh sai về dạng chuẩn."""
+    for bad, good in _OCR_DIACRITICS_MAP.items():
+        text = text.replace(bad, good)
+    return text
+
+
+def clean_footer(md_text: str) -> str:
+    """
+    Nhận NGUYÊN file markdown (sau OCR) và loại bỏ footer/chú thích cuối trang.
+
+    Footer sau OCR có 2 thành phần và hàm xử lý cả 2:
+      1. Dòng footer GIẢI THÍCH dạng "<sup>N</sup> ..." (thường bị bọc "*"):
+           "*<sup>1</sup> Khoản 1 Điều 94, khoản 1 Điều 110 Luật Đất đai năm 2024*"
+         -> XÓA cả dòng (kèm dòng trống quanh); nếu footer chen GIỮA câu đang dở
+         (dòng sau bắt đầu bằng chữ thường hoặc "(" và dòng trước chưa kết thúc
+         câu) thì nối 2 mảnh lại bằng dấu cách (giống remove_footnotes).
+      2. Dấu tham chiếu TRONG văn bản: "<sup>N</sup>", "²", "¹", "³", ... -> XÓA.
+    """
+    lines = md_text.splitlines()
+    kept = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if _FOOTNOTE_LINE_RE.match(line):
+            # bỏ dòng trống ngay trước cụm footer (nếu có)
+            if kept and not kept[-1].strip():
+                kept.pop()
+            # bỏ qua toàn bộ cụm footer (các dòng "<sup>" liên tiếp, xen dòng trống)
+            i += 1
+            while i < len(lines):
+                if _FOOTNOTE_LINE_RE.match(lines[i]):
+                    i += 1
+                    continue
+                if not lines[i].strip():
+                    i += 1
+                    continue
+                break
+            # bỏ dòng trống ngay sau cụm footer
+            while i < len(lines) and not lines[i].strip():
+                i += 1
+            # nối 2 mảnh câu nếu thỏa điều kiện
+            if kept and i < len(lines):
+                prev = kept[-1]
+                nxt = lines[i]
+                if (
+                    prev.strip()
+                    and not _ends_with_sentence_end(prev)
+                    and (_starts_lowercase(nxt) or nxt.lstrip().startswith("("))
+                ):
+                    kept[-1] = prev.rstrip() + " " + nxt.strip()
+                    i += 1
+            continue
+        kept.append(line)
+        i += 1
+
+    # Xóa dấu tham chiếu superscript còn sót trong văn bản
+    return _SUP_REF_RE.sub("", "\n".join(kept))
 
 
 def find_footnotes(raw_text: str) -> list:

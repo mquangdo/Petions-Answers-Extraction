@@ -57,6 +57,46 @@ _GROUP_RE = re.compile(
 _END_RE = re.compile(r"^\s*[#*_ \s]*?(Nơi nhận|BỘ TRƯỞNG|Lưu:|<!-- Start of picture)", re.I)
 
 # ---------------------------------------------------------------------------
+# Mốc mở đầu mục "3. Trách nhiệm tiếp tục theo dõi, thông tin kết quả"
+# Mục này nằm ở CUỐI phần trả lời (sau mục 2 - Kết quả nghiên cứu ...) và KHÔNG
+# được đưa vào tra_loi (đóng vai trò boundary: chặn phần trả lời). Mỗi kiến nghị
+# trong file nhiều kiến nghị (format 2) đều có mục 3 RIÊNG của nó; mốc này đảm bảo
+# cắt đúng mục của từng petition vì nó nằm trong tập "stops" (boundary = mốc gần
+# nhất sau S2 của petition đang xét).
+# Biến thể OCR thường gặp:
+#   "## 3. Trách nhiệm tiếp tục theo dõi, thông tin kết quả"  (heading markdown)
+#   "3. Trách nhiệm tiếp tục theo dõi, thông tin kết quả"      (không heading)
+# ---------------------------------------------------------------------------
+_TRACH_NHIEM_RE = re.compile(
+    r"^\s*[#*_>\s]*\s*\d*\.?\s*Trách nhiệm tiếp tục theo dõi, thông tin kết quả",
+    re.I,
+)
+
+# ---------------------------------------------------------------------------
+# Footer / chú thích cuối trang (footnote) sau OCR.
+# Sau khi OCR, footnote được bóc nhầm vào giữa nội dung và có 2 thành phần:
+#   1. Dấu tham chiếu TRONG văn bản: "<sup>1</sup>", "²", "¹", "³", ... -> sẽ bị
+#      XÓA khỏi text (không phải nội dung chính).
+#   2. Dòng footer GIẢI THÍCH ở cuối trang, bắt đầu bằng "<sup>N</sup>" (thường bị
+#      OCR bọc thêm "*"), vd:
+#        "*<sup>1</sup> Khoản 1 Điều 94, khoản 1 Điều 110 Luật Đất đai năm 2024*"
+#        "*<sup>2</sup> Điều 23 Nghị định số 88/2024/NĐ-CP ...*"
+#        "*<sup>[1]</sup> Khoản 3 và khoản 4 Điều 91 Luật Đất đai năm 2024.*"
+#      Những dòng này (bắt đầu ở đầu dòng bằng <sup>N</sup>) sẽ bị LOẠI BỎ hoàn toàn.
+# Yêu cầu bắt buộc có thẻ "<sup>" ở đầu dòng để KHÔNG nhầm với các dòng danh sách
+# đánh số "1. ...", "2. ..." trong nội dung.
+# ---------------------------------------------------------------------------
+_FOOTNOTE_LINE_RE = re.compile(
+    r"^\s*\*{0,2}<sup>\s*(?:\[\d+\]|\d{1,2})\s*</sup>",
+    re.I,
+)
+
+_SUP_REF_RE = re.compile(
+    r"<sup>\s*(?:\[\d+\]|\d{1,2})\s*</sup>|[\u00B2\u00B3\u00B9\u2070-\u2079]",
+    re.I,
+)
+
+# ---------------------------------------------------------------------------
 # Mốc câu kết cuối thư
 # Câu kết thường đứng GIỮA phần trả lời cuối và mốc "Nơi nhận", ví dụ:
 #   "Bộ Nông nghiệp và Môi trường trân trọng gửi Đoàn đại biểu Quốc hội tỉnh X
@@ -101,12 +141,20 @@ _ANS_HEAD_RE = re.compile(
 
 # ---------------------------------------------------------------------------
 # Metadata: Số công văn (trong dòng "Số: ...")
-# Ví dụ: "Số:            /BNNMT-TCCB 7878" hoặc "Số: /BNNMT-CCPT 7305 V/v trả lời..."
-# OCR đôi khi DÍNH dòng "Số:" với dòng ngày ("... 7873 _Hà Nội, ngày_ 16 ...")
-# -> lookahead chặn trước "_Hà Nội" để không nuốt phần ngày.
+# Các biến thể OCR thường gặp:
+#   "Số: 7869 /BNNMT-PC"            (số + space + suffix)
+#   "Số: 7993/BNNMT-ĐCKS"           (số + suffix, không space)
+#   "## Số:7093 /BNNMT-VPĐP"        (tiền tố heading markdown)
+#   "Số 7875 /BNNMT-TSKN"           (không có dấu ":")
+#   "**Số:** 7880 /BNNMT-TTTV"      (bold quanh nhãn + dấu ":")
+#   "Số: /BNNMT-PC"                 (chỉ suffix, không có số)
+# Node: đuôi mã bộ có thể chứa "Đ"/"đ" (QLĐĐ, VPĐP, ĐCKS, ĐĐBĐ...) nên char class
+# phải gồm cả Đ/đ (không chỉ A-Z ASCII) nếu không sẽ dừng/di-trước "Đ" và fail.
+# ^ đầu dòng: cho phép tiền tố heading "#", bold "*"ốặc "_"; dấu ":" optional.
+# Dừng trước "V/v" hoặc hết dòng; trailing "**" được loại bằng \*{0,2}.
 # ---------------------------------------------------------------------------
 _SO_CONG_VAN_RE = re.compile(
-    r"^\s*Số\s*[:\-]\s*(/.+?)(?=\s*_?Hà Nội|\s+V/v|\s*$)",
+    r"^\s*[#*_>\s]*\*{0,2}Số\*{0,2}\s*[:\-]?\s*\*{0,2}\s*([\d]*\s*/[A-Za-z0-9Đđ\-]+(?:\s*[A-Za-z0-9Đđ\-]+)*)\*{0,2}(?=\s*V/v|\s*$)",
     re.I | re.M,
 )
 
