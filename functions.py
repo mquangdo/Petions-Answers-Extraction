@@ -1,7 +1,9 @@
 import re
+import sys
 from pathlib import Path
 
 from postprocess import postprocess_noi_dung, postprocess_tra_loi
+from llm_chunking import extract_from_md
 from regexes import (
     _ANS_HEAD_RE,
     _CLOSING_RE,
@@ -155,7 +157,8 @@ def classify_format(md_text: str):
       - "f2": mỗi kiến nghị 1 mục riêng (GROUP header + S1 + S2) -> N kiến nghị.
       - "f3": liệt kê hết các kiến nghị trong 1 mục S1 (dạng "Kiến nghị số X:"),
         trả lời theo heading "2.x. Về/Đối với kiến nghị số ...".
-      - None: không nhận diện được (không có S1/S2).
+      - "llm": không nhận diện được 3 format chuẩn (không có S1/S2 ->
+        cần xử lý bằng LLM).
     """
     lines = md_text.splitlines()
     s1_pos = [i for i, line in enumerate(lines) if _is_s1(line)]
@@ -164,7 +167,7 @@ def classify_format(md_text: str):
     # (loại các dòng "2.x Nội dung kiến nghị: ..." nằm trong phần trả lời).
     s1_eff = [i for i in s1_pos if any(j > i for j in s2_pos)]
     if not s1_eff or not s2_pos:
-        return None
+        return "llm"
     if len(s1_eff) == 1 and len(s2_pos) == 1:
         start, end = s1_eff[0], s2_pos[0]
         n_items = (
@@ -301,16 +304,23 @@ def extract_petitions(md_text: str) -> list:
     Router: xác định format của file rồi route đến handler tương ứng.
     Trả về danh sách petition {"noi_dung", "tra_loi"}.
 
+    - f1/f2/f3: xử lý bằng regex (_extract_f1/f2/f3).
+    - "llm" (không nhận diện được 3 format chuẩn): xử lý bằng LLM
+      (_extract_llm, semantic chunking — 2 LLM calls, cần openai + network).
+
     LƯU Ý: text đầu vào phải là markdown đã qua post-OCR
     (postprocess.clean_footer + _fix_ocr_diacritics) — do bước OCR đảm nhận.
     """
     fmt = classify_format(md_text)
+    print(fmt)
     if fmt == "f1":
         return _extract_f1(md_text)
     if fmt == "f2":
         return _extract_f2(md_text)
     if fmt == "f3":
         return _extract_f3(md_text)
+    if fmt == "llm":
+        return _extract_llm(md_text)
     return []
 
 def extract_metadata(md_text: str) -> dict:
@@ -360,6 +370,25 @@ def extract_metadata(md_text: str) -> dict:
         result["nguoi_ky"] = f"Bộ trưởng {chosen}" if chosen else "Bộ trưởng"
 
     return result
+
+
+def _extract_llm(md_text: str) -> list:
+    """
+    Trích xuất bằng LLM — fallback khi file không nhận diện được format chuẩn
+    (dùng cho pipeline hybrid). Trả về SAME contract với extract_petitions:
+    list[{"noi_dung", "tra_loi"}].
+
+    LƯU Ý: mỗi lần gọi thực hiện 2 LLM calls (semantic chunking — xem
+    llm_chunking.py). Cảnh báo (VALIDATE/CAN_BANG/MISMATCH...) được in ra
+    stderr (giống llm_chunking.py main); hàm vẫn trả về list pairs thuần.
+    """
+    result = extract_from_md(md_text, file_name="document")
+    for w in result.get("warnings", []):
+        print(f"      [CẢNH BÁO] {w}", file=sys.stderr)
+    return [
+        {"noi_dung": kn, "tra_loi": tl}
+        for kn, tl in zip(result.get("kien_nghi", []), result.get("tra_loi", []))
+    ]
 
 
 if __name__ == "__main__":

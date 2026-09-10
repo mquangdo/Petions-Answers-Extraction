@@ -129,8 +129,11 @@ async def _ocr_extract_one(
     # Post-OCR làm sạch trước khi trích xuất (OCR bóc footer/chú thích vào nội dung)
     md_text = _fix_ocr_diacritics(md_text)
     md_text = clean_footer(md_text)
+    # Chạy extract_petitions trong thread riêng để nếu rơi vào fallback LLM (_extract_llm),
+    # lệnh asyncio.run() bên trong llm_chunking không bị xung đột với event loop hiện tại.
+    petitions = await asyncio.to_thread(extract_petitions, md_text)
     return {
-        "petitions": extract_petitions(md_text),
+        "petitions": petitions,
         "metadata": extract_metadata(md_text),
     }
 
