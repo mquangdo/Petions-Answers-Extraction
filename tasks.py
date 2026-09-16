@@ -25,6 +25,8 @@ celery_app = Celery("answer_matching", broker=os.environ["RABBITMQ_URL"])
 
 # Đây mới là chỗ khai báo QUEUE riêng trên RabbitMQ (durable mặc định).
 celery_app.conf.task_default_queue = "answer_matching"
+celery_app.conf.worker_prefetch_multiplier = 1
+celery_app.conf.task_acks_late = True
 
 
 @celery_app.task(bind=True, name="process_answer_matching")

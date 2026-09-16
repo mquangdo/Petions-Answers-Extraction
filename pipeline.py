@@ -40,6 +40,11 @@ OCR_TIMEOUT = 300       # giây, cho mỗi request OCR
 JACCARD_THRESHOLD = 0.5
 
 
+class NonRetryableOCRError(RuntimeError):
+    """Lỗi không thể khắc phục bằng cách thử lại (ví dụ HTTP 400: TABLE_CONTENT_UNSUPPORTED)."""
+    pass
+
+
 async def _ocr_pdf_async(
     filename: str,
     pdf_bytes: bytes,
@@ -71,7 +76,9 @@ async def _ocr_pdf_async(
                     f"HTTP {response.status_code} (có thể bị chặn/quá tải)"
                 )
             if response.status_code >= 400:
-                raise RuntimeError(response.text)
+                raise NonRetryableOCRError(
+                    f"HTTP {response.status_code}: {response.text}"
+                )
 
             result = response.json()
             text = result["pdf_content"]
@@ -79,6 +86,9 @@ async def _ocr_pdf_async(
             # Chuyển literal \n thành newline thật
             return text.replace("\\n", "\n")
 
+        except NonRetryableOCRError:
+            # Lỗi không thể retry (4xx) -> ném ra ngay lập tức, không lãng phí retry
+            raise
         except (httpx.HTTPError, RuntimeError, ValueError) as e:
             last_err = e
             if attempt == MAX_RETRIES:

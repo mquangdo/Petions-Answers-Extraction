@@ -1,1 +1,1 @@
-celery -A tasks worker -Q answer_matching --pool=solo --loglevel=info --logfile=worker.log --pidfile=worker.pid --detach
+celery -A tasks worker -Q answer_matching --pool=threads -c 4 --loglevel=info --logfile=worker.log --pidfile=worker.pid --detach
