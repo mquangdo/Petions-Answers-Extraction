@@ -33,7 +33,7 @@ OCR_URL = "https://8078--main--dev--sinhnq3.coder.vts-ai.space/step1/ocr"
 
 JITTER = 1.0            # jitter ngẫu nhiên (giây) thêm vào delay retry
 MAX_RETRIES = 5         # số lần thử lại tối đa cho 1 file
-RETRY_BACKOFF_BASE = 3  # giây, nhân đôi sau mỗi lần thử lại
+RETRY_BACKOFF_BASE = 1  # giây, nhân đôi sau mỗi lần thử lại
 RETRYABLE_CODES = {429, 500, 502, 503, 504}
 MAX_CONCURRENCY = 3     # số file PDF OCR đồng thời tối đa
 OCR_TIMEOUT = 300       # giây, cho mỗi request OCR
@@ -59,7 +59,7 @@ async def _ocr_pdf_async(
                     )
                 },
                 data={
-                    "use_celery": "true",
+                    "use_celery": "false",
                     "log_dir": "string",
                 },
             )
