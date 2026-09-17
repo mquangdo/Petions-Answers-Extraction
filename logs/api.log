@@ -1,0 +1,67 @@
+2026-09-17 17:12:20 [INFO] [api:76] - [startup] Đã kết nối DB và sẵn sàng bảng dữ liệu.
+2026-09-17 17:18:42 [INFO] [api:77] - [startup] Đã kết nối DB và sẵn sàng bảng dữ liệu.
+2026-09-17 17:19:34 [INFO] [api:338] - [API] Nhận request answer-matching: 1 files, force_reprocess=True
+2026-09-17 17:19:34 [INFO] [api:371] - [3d835a43-ffce-4b14-986a-7d96178ce9e2] Đã sinh cache_key: d59c693b7377...
+2026-09-17 17:19:34 [INFO] [api:396] - [3d835a43-ffce-4b14-986a-7d96178ce9e2] Đã lưu 1 files vào volume.
+2026-09-17 17:19:34 [INFO] [api:417] - [3d835a43-ffce-4b14-986a-7d96178ce9e2] Đã tạo job trong DB trạng thái processing.
+2026-09-17 17:19:34 [INFO] [api:441] - [3d835a43-ffce-4b14-986a-7d96178ce9e2] Đã enqueue Celery task vào RabbitMQ thành công.
+2026-09-17 17:19:50 [INFO] [api:338] - [API] Nhận request answer-matching: 5 files, force_reprocess=True
+2026-09-17 17:19:50 [INFO] [api:371] - [d41e951c-2a06-4565-9a3c-1d1f429a6286] Đã sinh cache_key: 667027cebd96...
+2026-09-17 17:19:50 [INFO] [api:396] - [d41e951c-2a06-4565-9a3c-1d1f429a6286] Đã lưu 5 files vào volume.
+2026-09-17 17:19:50 [INFO] [api:417] - [d41e951c-2a06-4565-9a3c-1d1f429a6286] Đã tạo job trong DB trạng thái processing.
+2026-09-17 17:19:50 [INFO] [api:441] - [d41e951c-2a06-4565-9a3c-1d1f429a6286] Đã enqueue Celery task vào RabbitMQ thành công.
+2026-09-17 17:22:14 [INFO] [api:338] - [API] Nhận request answer-matching: 4 files, force_reprocess=True
+2026-09-17 17:22:14 [INFO] [api:371] - [83bf0104-5781-42c9-b261-2f0322d37e49] Đã sinh cache_key: 6e363ad1de94...
+2026-09-17 17:22:14 [INFO] [api:396] - [83bf0104-5781-42c9-b261-2f0322d37e49] Đã lưu 4 files vào volume.
+2026-09-17 17:22:14 [INFO] [api:417] - [83bf0104-5781-42c9-b261-2f0322d37e49] Đã tạo job trong DB trạng thái processing.
+2026-09-17 17:22:14 [INFO] [api:441] - [83bf0104-5781-42c9-b261-2f0322d37e49] Đã enqueue Celery task vào RabbitMQ thành công.
+2026-09-17 17:22:54 [INFO] [api:338] - [API] Nhận request answer-matching: 4 files, force_reprocess=True
+2026-09-17 17:22:54 [INFO] [api:371] - [4ece42e1-c25a-4d0c-ab46-26cb36b7cc22] Đã sinh cache_key: 6e363ad1de94...
+2026-09-17 17:22:54 [INFO] [api:396] - [4ece42e1-c25a-4d0c-ab46-26cb36b7cc22] Đã lưu 4 files vào volume.
+2026-09-17 17:22:54 [INFO] [api:417] - [4ece42e1-c25a-4d0c-ab46-26cb36b7cc22] Đã tạo job trong DB trạng thái processing.
+2026-09-17 17:22:54 [INFO] [api:441] - [4ece42e1-c25a-4d0c-ab46-26cb36b7cc22] Đã enqueue Celery task vào RabbitMQ thành công.
+2026-09-17 17:23:51 [INFO] [api:338] - [API] Nhận request answer-matching: 2 files, force_reprocess=False
+2026-09-17 17:23:51 [INFO] [api:371] - [09494f3c-c1df-42b7-944f-6c1e37aa44f7] Đã sinh cache_key: 16e47854917b...
+2026-09-17 17:23:51 [INFO] [api:396] - [09494f3c-c1df-42b7-944f-6c1e37aa44f7] Đã lưu 2 files vào volume.
+2026-09-17 17:23:51 [INFO] [api:417] - [09494f3c-c1df-42b7-944f-6c1e37aa44f7] Đã tạo job trong DB trạng thái processing.
+2026-09-17 17:23:51 [INFO] [api:441] - [09494f3c-c1df-42b7-944f-6c1e37aa44f7] Đã enqueue Celery task vào RabbitMQ thành công.
+2026-09-17 17:24:24 [INFO] [api:338] - [API] Nhận request answer-matching: 2 files, force_reprocess=False
+2026-09-17 17:24:24 [INFO] [api:371] - [b5ddd053-dc1a-4c21-817f-e62eb0e28303] Đã sinh cache_key: 16e47854917b...
+2026-09-17 17:24:24 [INFO] [api:396] - [b5ddd053-dc1a-4c21-817f-e62eb0e28303] Đã lưu 2 files vào volume.
+2026-09-17 17:24:24 [INFO] [api:417] - [b5ddd053-dc1a-4c21-817f-e62eb0e28303] Đã tạo job trong DB trạng thái processing.
+2026-09-17 17:24:24 [INFO] [api:441] - [b5ddd053-dc1a-4c21-817f-e62eb0e28303] Đã enqueue Celery task vào RabbitMQ thành công.
+2026-09-17 17:24:57 [INFO] [api:338] - [API] Nhận request answer-matching: 1 files, force_reprocess=True
+2026-09-17 17:24:57 [INFO] [api:371] - [2d95ee46-7d83-4ee8-8f8e-f6181fb374b1] Đã sinh cache_key: dec012422a7a...
+2026-09-17 17:24:57 [INFO] [api:396] - [2d95ee46-7d83-4ee8-8f8e-f6181fb374b1] Đã lưu 1 files vào volume.
+2026-09-17 17:24:57 [INFO] [api:417] - [2d95ee46-7d83-4ee8-8f8e-f6181fb374b1] Đã tạo job trong DB trạng thái processing.
+2026-09-17 17:24:57 [INFO] [api:441] - [2d95ee46-7d83-4ee8-8f8e-f6181fb374b1] Đã enqueue Celery task vào RabbitMQ thành công.
+2026-09-17 17:25:08 [INFO] [api:338] - [API] Nhận request answer-matching: 1 files, force_reprocess=True
+2026-09-17 17:25:08 [INFO] [api:371] - [39204943-feb8-4828-a649-1998e0812ddd] Đã sinh cache_key: 58f99b62201c...
+2026-09-17 17:25:08 [INFO] [api:396] - [39204943-feb8-4828-a649-1998e0812ddd] Đã lưu 1 files vào volume.
+2026-09-17 17:25:08 [INFO] [api:417] - [39204943-feb8-4828-a649-1998e0812ddd] Đã tạo job trong DB trạng thái processing.
+2026-09-17 17:25:08 [INFO] [api:441] - [39204943-feb8-4828-a649-1998e0812ddd] Đã enqueue Celery task vào RabbitMQ thành công.
+2026-09-17 17:25:26 [INFO] [api:338] - [API] Nhận request answer-matching: 3 files, force_reprocess=True
+2026-09-17 17:25:26 [INFO] [api:371] - [60f5e848-d98a-457d-b183-b2509d9cbf6c] Đã sinh cache_key: 805180cd7a05...
+2026-09-17 17:25:26 [INFO] [api:396] - [60f5e848-d98a-457d-b183-b2509d9cbf6c] Đã lưu 3 files vào volume.
+2026-09-17 17:25:26 [INFO] [api:417] - [60f5e848-d98a-457d-b183-b2509d9cbf6c] Đã tạo job trong DB trạng thái processing.
+2026-09-17 17:25:26 [INFO] [api:441] - [60f5e848-d98a-457d-b183-b2509d9cbf6c] Đã enqueue Celery task vào RabbitMQ thành công.
+2026-09-17 17:25:44 [INFO] [api:338] - [API] Nhận request answer-matching: 3 files, force_reprocess=True
+2026-09-17 17:25:44 [INFO] [api:371] - [1d69dfa2-2456-4212-897c-ae69950fd615] Đã sinh cache_key: 363b31777a4c...
+2026-09-17 17:25:44 [INFO] [api:396] - [1d69dfa2-2456-4212-897c-ae69950fd615] Đã lưu 3 files vào volume.
+2026-09-17 17:25:44 [INFO] [api:417] - [1d69dfa2-2456-4212-897c-ae69950fd615] Đã tạo job trong DB trạng thái processing.
+2026-09-17 17:25:44 [INFO] [api:441] - [1d69dfa2-2456-4212-897c-ae69950fd615] Đã enqueue Celery task vào RabbitMQ thành công.
+2026-09-17 17:26:42 [INFO] [api:338] - [API] Nhận request answer-matching: 2 files, force_reprocess=True
+2026-09-17 17:26:42 [INFO] [api:371] - [7cb6ae65-6a2a-4489-b844-64aa1bf8db5b] Đã sinh cache_key: 6f0c16e8f0ca...
+2026-09-17 17:26:42 [INFO] [api:396] - [7cb6ae65-6a2a-4489-b844-64aa1bf8db5b] Đã lưu 2 files vào volume.
+2026-09-17 17:26:42 [INFO] [api:417] - [7cb6ae65-6a2a-4489-b844-64aa1bf8db5b] Đã tạo job trong DB trạng thái processing.
+2026-09-17 17:26:42 [INFO] [api:441] - [7cb6ae65-6a2a-4489-b844-64aa1bf8db5b] Đã enqueue Celery task vào RabbitMQ thành công.
+2026-09-17 17:27:06 [INFO] [api:338] - [API] Nhận request answer-matching: 1 files, force_reprocess=True
+2026-09-17 17:27:06 [INFO] [api:371] - [5b2b1966-2d61-4c11-8adf-66a939edba07] Đã sinh cache_key: b73feeb74f96...
+2026-09-17 17:27:06 [INFO] [api:396] - [5b2b1966-2d61-4c11-8adf-66a939edba07] Đã lưu 1 files vào volume.
+2026-09-17 17:27:06 [INFO] [api:417] - [5b2b1966-2d61-4c11-8adf-66a939edba07] Đã tạo job trong DB trạng thái processing.
+2026-09-17 17:27:06 [INFO] [api:441] - [5b2b1966-2d61-4c11-8adf-66a939edba07] Đã enqueue Celery task vào RabbitMQ thành công.
+2026-09-17 17:27:22 [INFO] [api:338] - [API] Nhận request answer-matching: 1 files, force_reprocess=True
+2026-09-17 17:27:22 [INFO] [api:371] - [df5d9939-a118-4c96-8cd1-db07118ac28e] Đã sinh cache_key: fef58dce3c90...
+2026-09-17 17:27:22 [INFO] [api:396] - [df5d9939-a118-4c96-8cd1-db07118ac28e] Đã lưu 1 files vào volume.
+2026-09-17 17:27:22 [INFO] [api:417] - [df5d9939-a118-4c96-8cd1-db07118ac28e] Đã tạo job trong DB trạng thái processing.
+2026-09-17 17:27:22 [INFO] [api:441] - [df5d9939-a118-4c96-8cd1-db07118ac28e] Đã enqueue Celery task vào RabbitMQ thành công.

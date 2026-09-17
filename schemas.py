@@ -23,8 +23,6 @@ Contract nội bộ API <-> Celery worker:
 import json
 import re
 
-import json
-
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 

@@ -24,12 +24,23 @@ from sqlalchemy import String, Text, create_engine, func, select
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql+psycopg2://postgres:mysecretpassword@localhost:5432/postgres",
+from config import (
+    DATABASE_URL,
+    DB_MAX_OVERFLOW,
+    DB_POOL_RECYCLE,
+    DB_POOL_SIZE,
 )
+from logger import get_logger
 
-engine = create_engine(DATABASE_URL)
+logger = get_logger("db", "db.log")
+
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    pool_size=DB_POOL_SIZE,
+    max_overflow=DB_MAX_OVERFLOW,
+    pool_recycle=DB_POOL_RECYCLE,
+)
 SessionLocal = sessionmaker(bind=engine)
 
 
@@ -119,7 +130,7 @@ def get_cached_result(cache_key: str) -> dict | None:
                 return None
             return dict(row.result)
     except Exception as e:
-        print(f"[cache] Không thể đọc cache {cache_key[:12]}...: {e}")
+        logger.warning(f"[cache] Không thể đọc cache {cache_key[:12]}...: {e}")
         return None
 
 
@@ -141,8 +152,9 @@ def put_cached_result(cache_key: str, data_list: list[dict], result: dict) -> No
                 row.data_list = data_list
                 row.result = result
             session.commit()
+            logger.info(f"[cache] Đã lưu cache thành công cho key {cache_key[:12]}...")
     except Exception as e:
-        print(f"[cache] Không thể ghi cache cho {cache_key[:12]}...: {e}")
+        logger.error(f"[cache] Không thể ghi cache cho {cache_key[:12]}...: {e}")
 
 
 def find_cache_keys_by_data(data_list_json: str) -> list[str]:

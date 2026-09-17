@@ -2,8 +2,11 @@ import re
 import sys
 from pathlib import Path
 
-from postprocess import postprocess_noi_dung, postprocess_tra_loi
 from llm_chunking import extract_from_md
+from logger import get_logger
+from postprocess import postprocess_noi_dung, postprocess_tra_loi
+
+logger = get_logger("functions", "pipeline.log")
 from regexes import (
     _ANS_HEAD_RE,
     _CLOSING_RE,
@@ -299,7 +302,7 @@ def _extract_f3(md_text: str) -> list:
     return petitions
 
 
-def extract_petitions(md_text: str) -> list:
+async def extract_petitions(md_text: str) -> list:
     """
     Router: xác định format của file rồi route đến handler tương ứng.
     Trả về danh sách petition {"noi_dung", "tra_loi"}.
@@ -312,7 +315,7 @@ def extract_petitions(md_text: str) -> list:
     (postprocess.clean_footer + _fix_ocr_diacritics) — do bước OCR đảm nhận.
     """
     fmt = classify_format(md_text)
-    print(fmt)
+    logger.info(f"[classifier] Định dạng văn bản nhận diện được: {fmt}")
     if fmt == "f1":
         return _extract_f1(md_text)
     if fmt == "f2":
@@ -320,7 +323,7 @@ def extract_petitions(md_text: str) -> list:
     if fmt == "f3":
         return _extract_f3(md_text)
     if fmt == "llm":
-        return _extract_llm(md_text)
+        return await _extract_llm(md_text)
     return []
 
 def extract_metadata(md_text: str) -> dict:
@@ -372,7 +375,7 @@ def extract_metadata(md_text: str) -> dict:
     return result
 
 
-def _extract_llm(md_text: str) -> list:
+async def _extract_llm(md_text: str) -> list:
     """
     Trích xuất bằng LLM — fallback khi file không nhận diện được format chuẩn
     (dùng cho pipeline hybrid). Trả về SAME contract với extract_petitions:
@@ -380,11 +383,11 @@ def _extract_llm(md_text: str) -> list:
 
     LƯU Ý: mỗi lần gọi thực hiện 2 LLM calls (semantic chunking — xem
     llm_chunking.py). Cảnh báo (VALIDATE/CAN_BANG/MISMATCH...) được in ra
-    stderr (giống llm_chunking.py main); hàm vẫn trả về list pairs thuần.
+    logger; hàm vẫn trả về list pairs thuần.
     """
-    result = extract_from_md(md_text, file_name="document")
+    result = await extract_from_md(md_text, file_name="document")
     for w in result.get("warnings", []):
-        print(f"      [CẢNH BÁO] {w}", file=sys.stderr)
+        logger.warning(f"      [CẢNH BÁO LLM] {w}")
     return [
         {"noi_dung": kn, "tra_loi": tl}
         for kn, tl in zip(result.get("kien_nghi", []), result.get("tra_loi", []))

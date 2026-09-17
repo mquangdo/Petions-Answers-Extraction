@@ -14,17 +14,17 @@ import os
 
 from celery import Celery
 
+from config import CELERY_QUEUE, RABBITMQ_URL
 from db import create_tables, get_cached_result, put_cached_result, set_failed, set_succeeded
+from logger import get_logger
 from pipeline import run_pipeline
 from schemas import InternalJobPayload
 
-# "answer_matching" ở đây chỉ là TÊN APP (nhãn), không phải queue.
-# Broker URL đọc từ env var, ví dụ:
-#   amqp://admin:admin123@localhost:5672/
-celery_app = Celery("answer_matching", broker=os.environ["RABBITMQ_URL"])
+logger = get_logger("worker", "worker.log")
 
-# Đây mới là chỗ khai báo QUEUE riêng trên RabbitMQ (durable mặc định).
-celery_app.conf.task_default_queue = "answer_matching"
+celery_app = Celery("answer_matching", broker=RABBITMQ_URL)
+
+celery_app.conf.task_default_queue = CELERY_QUEUE
 celery_app.conf.worker_prefetch_multiplier = 1
 celery_app.conf.task_acks_late = True
 
@@ -53,11 +53,11 @@ def process_answer_matching(self, data_list, file_ids, file_paths, cache_key=Non
         )
     except Exception as e:
         set_failed(job_id, f"Payload trong queue sai schema: {e}")
-        print(f"[process_answer_matching] Job {job_id} THẤT BẠI: {e}")
+        logger.error(f"[worker] Job {job_id} THẤT BẠI schema: {e}")
         raise
 
-    print(
-        f"[process_answer_matching] Bắt đầu job {job_id}: "
+    logger.info(
+        f"[worker] Bắt đầu job {job_id}: "
         f"{len(payload.data_list)} kiến nghị, {len(payload.file_ids)} file"
     )
 
@@ -66,9 +66,8 @@ def process_answer_matching(self, data_list, file_ids, file_paths, cache_key=Non
         cached = get_cached_result(cache_key)
         if cached is not None:
             set_succeeded(job_id, cached)
-            print(
-                f"[process_answer_matching] Job {job_id} CACHE HIT — "
-                "bỏ qua pipeline."
+            logger.info(
+                f"[worker] Job {job_id} CACHE HIT — bỏ qua pipeline."
             )
             return cached
 
@@ -80,15 +79,15 @@ def process_answer_matching(self, data_list, file_ids, file_paths, cache_key=Non
         )
     except Exception as e:
         set_failed(job_id, str(e))
-        print(f"[process_answer_matching] Job {job_id} THẤT BẠI: {e}")
+        logger.error(f"[worker] Job {job_id} THẤT BẠI: {e}")
         raise
 
     if cache_key:
         put_cached_result(cache_key, payload.data_list, result)
 
     set_succeeded(job_id, result)
-    print(
-        f"[process_answer_matching] Hoàn tất job {job_id}: "
+    logger.info(
+        f"[worker] Hoàn tất job {job_id}: "
         f"matched={result['metadata_all']['matched_count']}, "
         f"unmatched={result['metadata_all']['unmatched_count']}"
     )

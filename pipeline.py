@@ -25,19 +25,23 @@ import unicodedata
 
 import httpx
 
-from functions import extract_petitions, extract_metadata
+from config import (
+    JACCARD_THRESHOLD,
+    JITTER,
+    MAX_CONCURRENCY,
+    OCR_MAX_RETRIES,
+    OCR_TIMEOUT,
+    OCR_URL,
+    RETRY_BACKOFF_BASE,
+)
+from functions import extract_metadata, extract_petitions
+from logger import get_logger
 from postprocess import _fix_ocr_diacritics, clean_footer
 
+logger = get_logger("pipeline", "pipeline.log")
 
-OCR_URL = "http://127.0.0.1:8078/step1/ocr"
-
-JITTER = 1.0            # jitter ngẫu nhiên (giây) thêm vào delay retry
-MAX_RETRIES = 5         # số lần thử lại tối đa cho 1 file
-RETRY_BACKOFF_BASE = 1  # giây, nhân đôi sau mỗi lần thử lại
+MAX_RETRIES = OCR_MAX_RETRIES
 RETRYABLE_CODES = {429, 500, 502, 503, 504}
-MAX_CONCURRENCY = 3     # số file PDF OCR đồng thời tối đa
-OCR_TIMEOUT = 300       # giây, cho mỗi request OCR
-JACCARD_THRESHOLD = 0.5
 
 
 class NonRetryableOCRError(RuntimeError):
@@ -69,7 +73,7 @@ async def _ocr_pdf_async(
                 },
             )
 
-            print(f"  [{filename}] Status code: {response.status_code}")
+            logger.info(f"  [{filename}] OCR status code: {response.status_code}")
 
             if response.status_code in RETRYABLE_CODES:
                 raise RuntimeError(
@@ -94,8 +98,8 @@ async def _ocr_pdf_async(
             if attempt == MAX_RETRIES:
                 break
             wait = RETRY_BACKOFF_BASE * (2 ** (attempt - 1)) + random.uniform(0, JITTER)
-            print(
-                f"  [{filename}] Thử lại {attempt}/{MAX_RETRIES - 1} sau {wait:.1f}s "
+            logger.warning(
+                f"  [{filename}] OCR thử lại {attempt}/{MAX_RETRIES - 1} sau {wait:.1f}s "
                 f"(lỗi: {e})"
             )
             await asyncio.sleep(wait)
@@ -118,7 +122,9 @@ def _jaccard(a: str, b: str) -> float:
     sb = _normalize(b)
     if not sa or not sb:
         return 0.0
-    return len(sa & sb) / len(sa | sb)
+    intersection = len(sa & sb)
+    union = len(sa | sb)
+    return intersection / union if union else 0.0
 
 
 def _read_pdf(path: str) -> bytes:
@@ -139,9 +145,8 @@ async def _ocr_extract_one(
     # Post-OCR làm sạch trước khi trích xuất (OCR bóc footer/chú thích vào nội dung)
     md_text = _fix_ocr_diacritics(md_text)
     md_text = clean_footer(md_text)
-    # Chạy extract_petitions trong thread riêng để nếu rơi vào fallback LLM (_extract_llm),
-    # lệnh asyncio.run() bên trong llm_chunking không bị xung đột với event loop hiện tại.
-    petitions = await asyncio.to_thread(extract_petitions, md_text)
+    # Trích xuất petitions thuần async
+    petitions = await extract_petitions(md_text)
     return {
         "petitions": petitions,
         "metadata": extract_metadata(md_text),
@@ -257,14 +262,11 @@ async def run_pipeline_async(
             }
         )
 
-    try:
-        print(
-            f"  [pipeline] {len(data_list)} kiến nghị, "
-            f"{len(file_ids)} file, {len(pairs)} cặp trích xuất, "
-            f"matched={matched}, elapsed={time.monotonic() - start_time:.2f}s"
-        )
-    except UnicodeEncodeError:
-        pass
+    logger.info(
+        f"  [pipeline] {len(data_list)} kiến nghị, "
+        f"{len(file_ids)} file, {len(pairs)} cặp trích xuất, "
+        f"matched={matched}, elapsed={time.monotonic() - start_time:.2f}s"
+    )
 
     return {
         "data_list": results,

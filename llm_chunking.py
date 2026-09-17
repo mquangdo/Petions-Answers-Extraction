@@ -125,13 +125,16 @@ def _clean_block(raw: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Config
+# Config & Logger
 # ---------------------------------------------------------------------------
-BASE_URL = "http://127.0.0.1:8076/v1"
-MODEL_NAME = "google/gemma-4-26B-A4B-it"
-client = AsyncOpenAI(base_url=BASE_URL, api_key="empty")
+from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_NAME, LLM_TIMEOUT
+from logger import get_logger
 
-_LLM_TIMEOUT = 300
+logger = get_logger("llm", "pipeline.log")
+
+client = AsyncOpenAI(base_url=LLM_BASE_URL, api_key=LLM_API_KEY)
+MODEL_NAME = LLM_MODEL_NAME
+_LLM_TIMEOUT = LLM_TIMEOUT
 MAX_RETRIES = 3
 
 # ---------------------------------------------------------------------------
@@ -499,7 +502,7 @@ def build_output(file_name: str, units: list[Unit], kn_groups: list[list[str]],
     }
 
 
-def extract_from_md(markdown: str, file_name: str = "document", max_tries: int = 3) -> dict:
+async def extract_from_md(markdown: str, file_name: str = "document", max_tries: int = 3) -> dict:
     """Chạy pipeline v3: segment + 2 LLM call + validate + cân bằng KN==TL."""
     units = segment_units_simple(markdown)
 
@@ -521,13 +524,18 @@ def extract_from_md(markdown: str, file_name: str = "document", max_tries: int =
     last_kn_groups = last_tl_groups = None
     last_reports = ({"errors": [], "warnings": []}, {"errors": [], "warnings": []})
     for attempt in range(max_tries):
-        raw_kn = asyncio.run(_call_llm(units, KIEN_NGHI_SYSTEM_PROMPT, hint))
-        raw_tl = asyncio.run(_call_llm(units, TRA_LOI_SYSTEM_PROMPT, hint))
+        # Chạy song song 2 prompt LLM (Kiến nghị + Trả lời)
+        logger.info(f"[{file_name}] Bắt đầu gọi song song 2 prompt LLM (lần {attempt + 1}/{max_tries})...")
+        raw_kn, raw_tl = await asyncio.gather(
+            _call_llm(units, KIEN_NGHI_SYSTEM_PROMPT, hint),
+            _call_llm(units, TRA_LOI_SYSTEM_PROMPT, hint),
+        )
         try:
             seen = set()
             kn_groups, report_kn = validate_and_resolve(raw_kn, units_by_id, all_ids_ordered, None)
             tl_groups, report_tl = validate_and_resolve(raw_tl, units_by_id, all_ids_ordered, seen)
         except ValueError as e:
+            logger.warning(f"[{file_name}] LLM output parse lỗi: {e}")
             hint = (f"Lần trước JSON của bạn không hợp lệ ({e}). "
                     f"Hãy chỉ xuất MỘT JSON array of arrays duy nhất với các ID unit "
                     f"có trong danh sách.")
@@ -537,7 +545,9 @@ def extract_from_md(markdown: str, file_name: str = "document", max_tries: int =
         last_reports = (report_kn, report_tl)
         n_kn, n_tl = len(kn_groups), len(tl_groups)
         if n_kn == n_tl:
+            logger.info(f"[{file_name}] LLM extract thành công cân bằng: {n_kn} KN và {n_tl} TL.")
             return build_output(file_name, units, kn_groups, tl_groups, report_kn, report_tl)
+        logger.warning(f"[{file_name}] Lệch số lượng: {n_kn} KN != {n_tl} TL. Đang thử lại...")
         hint = (f"Số KIẾN NGHỊ ({n_kn}) KHÁC số CÂU TRẢ LỜI ({n_tl}) bạn vừa trả. "
                 f"YÊU CẦU: mỗi kiến nghị có ĐÚNG MỘT câu trả lời, số trả lời PHẢI bằng "
                 f"số kiến nghị. Hãy kiểm tra lại danh sách unit và xuất lại TOÀN BỘ JSON "
@@ -580,6 +590,11 @@ def extract_from_md(markdown: str, file_name: str = "document", max_tries: int =
     return result
 
 
+def extract_from_md_sync(markdown_text: str, file_name: str = "document", max_tries: int = 3) -> dict:
+    """Wrapper đồng bộ cho CLI hoặc script test."""
+    return asyncio.run(extract_from_md(markdown_text, file_name, max_tries))
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -608,7 +623,7 @@ def main():
 
     print("[2/3] Gọi LLM 2 lần (gộp KIẾN NGHỊ + gộp CÂU TRẢ LỜI theo unit) ...")
     t0 = time.monotonic()
-    result = extract_from_md(markdown, md_path.name, max_tries=MAX_RETRIES)
+    result = extract_from_md_sync(markdown, md_path.name, max_tries=MAX_RETRIES)
     print(f"      done ({time.monotonic() - t0:.1f}s)")
 
     print("[3/3] Validate + gom khối ...")

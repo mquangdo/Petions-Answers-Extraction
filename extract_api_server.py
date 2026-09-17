@@ -30,6 +30,7 @@ import hashlib
 import json
 import os
 import shutil
+import time
 import uuid
 from contextlib import asynccontextmanager
 
@@ -38,6 +39,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from kombu.exceptions import OperationalError
 
+from config import FILE_STORE_DIR, MAX_FILE_SIZE, MAX_FILE_SIZE_MB
 from db import (
     create_job as db_create_job,
     create_tables,
@@ -45,18 +47,12 @@ from db import (
     get_job,
     set_failed,
 )
+from logger import get_logger
 from postprocess import normalize_markdown, strip_markdown
 from schemas import JobStatus, OutputResponse, parse_data_list, parse_file_ids
 from tasks import process_answer_matching
 
-
-# ============================================================
-# Configuration
-# ============================================================
-
-MAX_FILE_SIZE_MB = int(os.environ.get("MAX_FILE_SIZE_MB", "50"))
-MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024
-FILE_STORE_DIR = os.environ.get("FILE_STORE_DIR", "./uploaded_files")
+logger = get_logger("api", "api.log")
 
 
 # ============================================================
@@ -78,9 +74,10 @@ async def lifespan(app: FastAPI):
     os.makedirs(FILE_STORE_DIR, exist_ok=True)
     try:
         create_tables()
+        logger.info("[startup] Đã kết nối DB và sẵn sàng bảng dữ liệu.")
     except Exception as e:
-        print(f"[startup] CẢNH BÁO: chưa tạo được bảng trong PostgreSQL ({e})")
-        print("[startup] API vẫn khởi động. Kiểm tra DATABASE_URL/docker compose up -d db.")
+        logger.warning(f"[startup] CẢNH BÁO: chưa tạo được bảng trong PostgreSQL ({e})")
+        logger.warning("[startup] API vẫn khởi động. Kiểm tra DATABASE_URL/docker compose up -d db.")
     yield
 
 
@@ -338,6 +335,11 @@ async def create_answer_matching(
         return {request_id, status: PROCESSING}
     """
 
+    logger.info(
+        f"[API] Nhận request answer-matching: {len(files)} files, "
+        f"force_reprocess={force_reprocess}"
+    )
+
     # --------------------------------------------------------
     # 1. Parse + validate form fields
     # --------------------------------------------------------
@@ -346,16 +348,16 @@ async def create_answer_matching(
         parsed_data_list = parse_data_list(data_list)
         parsed_file_ids = parse_file_ids(file_ids)
     except ValueError as e:
+        logger.warning(f"[API] Validate form thất bại: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
     if len(parsed_file_ids) != len(files):
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Số lượng file_ids ({len(parsed_file_ids)}) phải bằng chính xác "
-                f"số lượng files ({len(files)})."
-            ),
+        err_msg = (
+            f"Số lượng file_ids ({len(parsed_file_ids)}) phải bằng chính xác "
+            f"số lượng files ({len(files)})."
         )
+        logger.warning(f"[API] {err_msg}")
+        raise HTTPException(status_code=400, detail=err_msg)
 
     contents = await _read_and_validate_files(files)
 
@@ -366,6 +368,7 @@ async def create_answer_matching(
     request_id = str(uuid.uuid4())
     file_hashes = [_sha256_bytes(b) for b in contents]
     cache_key = _compute_cache_key(parsed_file_ids, file_hashes, parsed_data_list)
+    logger.info(f"[{request_id}] Đã sinh cache_key: {cache_key[:12]}...")
 
     # --------------------------------------------------------
     # 3. Cache hit -> trả FINISHED ngay (trừ khi force_reprocess)
@@ -374,6 +377,7 @@ async def create_answer_matching(
     if not force_reprocess:
         cached = get_cached_result(cache_key)
         if cached is not None:
+            logger.info(f"[{request_id}] CACHE HIT! Trả ngay kết quả FINISHED.")
             result = _convert_result_format(cached, plain_text=True)
             return {
                 "request_id": request_id,
@@ -389,7 +393,9 @@ async def create_answer_matching(
 
     try:
         file_paths = _save_files(request_id, contents)
+        logger.info(f"[{request_id}] Đã lưu {len(file_paths)} files vào volume.")
     except OSError as e:
+        logger.error(f"[{request_id}] Không thể lưu file upload: {e}")
         raise HTTPException(
             status_code=500,
             detail=f"Không thể lưu file upload: {e}",
@@ -408,9 +414,11 @@ async def create_answer_matching(
 
     try:
         db_create_job(job_id=request_id, job_input=job_input)
+        logger.info(f"[{request_id}] Đã tạo job trong DB trạng thái processing.")
     except Exception as e:
         # Dọn dẹp file đã lưu để không rác tích tụ
         shutil.rmtree(os.path.join(FILE_STORE_DIR, request_id), ignore_errors=True)
+        logger.error(f"[{request_id}] Lỗi DB create_job: {e}")
         raise HTTPException(
             status_code=503,
             detail=f"Không thể lưu job vào PostgreSQL: {e}",
@@ -430,13 +438,10 @@ async def create_answer_matching(
             },
             task_id=request_id,
         )
+        logger.info(f"[{request_id}] Đã enqueue Celery task vào RabbitMQ thành công.")
 
     except OperationalError as e:
-
-        # Record đã tồn tại trong DB nhưng message chưa được
-        # publish thành công.
-        #
-        # Đánh dấu failed để không để job nằm mãi ở trạng thái processing.
+        logger.error(f"[{request_id}] Lỗi kết nối RabbitMQ: {e}")
         try:
             set_failed(request_id, f"Không kết nối được RabbitMQ: {e}")
         except Exception:
@@ -452,7 +457,7 @@ async def create_answer_matching(
         )
 
     except Exception as e:
-
+        logger.error(f"[{request_id}] Lỗi submit Celery task: {e}")
         try:
             set_failed(request_id, f"Lỗi khi submit Celery task: {e}")
         except Exception:
