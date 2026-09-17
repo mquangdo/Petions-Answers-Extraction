@@ -29,7 +29,7 @@ from functions import extract_petitions, extract_metadata
 from postprocess import _fix_ocr_diacritics, clean_footer
 
 
-OCR_URL = "https://8078--main--dev--sinhnq3.coder.vts-ai.space/step1/ocr"
+OCR_URL = "http://127.0.0.1:8078/step1/ocr"
 
 JITTER = 1.0            # jitter ngẫu nhiên (giây) thêm vào delay retry
 MAX_RETRIES = 5         # số lần thử lại tối đa cho 1 file

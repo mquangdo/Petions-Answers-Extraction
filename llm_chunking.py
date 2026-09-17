@@ -127,7 +127,7 @@ def _clean_block(raw: str) -> str:
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-BASE_URL = "https://8076--main--dev--sinhnq3.coder.vts-ai.space/v1"
+BASE_URL = "http://127.0.0.1:8076/v1"
 MODEL_NAME = "google/gemma-4-26B-A4B-it"
 client = AsyncOpenAI(base_url=BASE_URL, api_key="empty")
 
