@@ -47,7 +47,8 @@ JITTER = float(os.environ.get("JITTER", "1.0"))                         # jitter
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://127.0.0.1:8076/v1")
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "EMPTY")
 LLM_MODEL_NAME = os.environ.get("LLM_MODEL_NAME", "google/gemma-4-26B-A4B-it")
-LLM_TIMEOUT = float(os.environ.get("LLM_TIMEOUT", "120.0"))
+LLM_TIMEOUT = float(os.environ.get("LLM_TIMEOUT", "300.0"))
+LLM_CONCURRENCY = int(os.environ.get("LLM_CONCURRENCY", "1"))
 
 # Business Logic Thresholds
 JACCARD_THRESHOLD = float(os.environ.get("JACCARD_THRESHOLD", "0.5"))

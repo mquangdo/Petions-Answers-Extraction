@@ -524,12 +524,11 @@ async def extract_from_md(markdown: str, file_name: str = "document", max_tries:
     last_kn_groups = last_tl_groups = None
     last_reports = ({"errors": [], "warnings": []}, {"errors": [], "warnings": []})
     for attempt in range(max_tries):
-        # Chạy song song 2 prompt LLM (Kiến nghị + Trả lời)
-        logger.info(f"[{file_name}] Bắt đầu gọi song song 2 prompt LLM (lần {attempt + 1}/{max_tries})...")
-        raw_kn, raw_tl = await asyncio.gather(
-            _call_llm(units, KIEN_NGHI_SYSTEM_PROMPT, hint),
-            _call_llm(units, TRA_LOI_SYSTEM_PROMPT, hint),
-        )
+        # Chạy tuần tự 2 prompt LLM để tiết kiệm VRAM GPU (tránh tràn KV Cache)
+        logger.info(f"[{file_name}] Bắt đầu gọi prompt Kiến nghị (lần {attempt + 1}/{max_tries})...")
+        raw_kn = await _call_llm(units, KIEN_NGHI_SYSTEM_PROMPT, hint)
+        logger.info(f"[{file_name}] Bắt đầu gọi prompt Trả lời (lần {attempt + 1}/{max_tries})...")
+        raw_tl = await _call_llm(units, TRA_LOI_SYSTEM_PROMPT, hint)
         try:
             seen = set()
             kn_groups, report_kn = validate_and_resolve(raw_kn, units_by_id, all_ids_ordered, None)

@@ -1,7 +1,9 @@
+import asyncio
 import re
 import sys
 from pathlib import Path
 
+from config import LLM_CONCURRENCY
 from llm_chunking import extract_from_md
 from logger import get_logger
 from postprocess import postprocess_noi_dung, postprocess_tra_loi
@@ -302,7 +304,7 @@ def _extract_f3(md_text: str) -> list:
     return petitions
 
 
-async def extract_petitions(md_text: str) -> list:
+async def extract_petitions(md_text: str, llm_semaphore: asyncio.Semaphore | None = None) -> list:
     """
     Router: xác định format của file rồi route đến handler tương ứng.
     Trả về danh sách petition {"noi_dung", "tra_loi"}.
@@ -323,7 +325,7 @@ async def extract_petitions(md_text: str) -> list:
     if fmt == "f3":
         return _extract_f3(md_text)
     if fmt == "llm":
-        return await _extract_llm(md_text)
+        return await _extract_llm(md_text, llm_semaphore=llm_semaphore)
     return []
 
 def extract_metadata(md_text: str) -> dict:
@@ -342,23 +344,20 @@ def extract_metadata(md_text: str) -> dict:
         val = re.sub(r"\s+", "", val)
         result["so_cong_van"] = val
 
-    # 2. Ngày ban hành: "Hà Nội, ngày DD tháng MM năm YYYY" (phải đủ ngày + tháng)
+    # 2. Ngày ban hành: tìm mốc "ngày ... tháng ... năm ..."
     m = _NGAY_BAN_HANH_RE.search(md_text)
     if m:
-        day, month, year = m.groups()
-        if day and month:
-            result["ngay_ban_hanh"] = f"{int(day):02d}/{int(month):02d}/{year}"
+        d, mo, y = m.group(1), m.group(2), m.group(3)
+        result["ngay_ban_hanh"] = f"{int(d):02d}/{int(mo):02d}/{y}"
 
-    # 3. Người ký: chỉ tìm trong 40 dòng CUỐI (vùng chữ ký), tránh bắt nhầm
-    #    "của Bộ trưởng ..." trong thân thư.
-    tail = "\n".join(md_text.splitlines()[-40:])
-    matches = list(_NGUOI_KY_RE.finditer(tail))
-    if matches:
-        # Ưu tiên match có tên "sạch" (không phải câu thân thư); nếu tất cả
-        # đều bẩn thì vẫn trả về chức danh "Bộ trưởng".
+    # 3. Người ký: tìm block "BỘ TRƯỞNG" / "THỨ TRƯỞNG" -> dòng hoa liền kề
+    m = _NGUOI_KY_RE.search(md_text)
+    if m:
+        # Lấy tối đa 10 dòng sau chức danh để tìm dòng họ tên (chữ HOA hoàn toàn)
+        tail = md_text[m.end() : m.end() + 600]
         chosen = None
-        for m in matches:
-            name = (m.group(1) or "").strip()
+        for line in tail.splitlines()[:10]:
+            name = _extract_signer_name(line)
             if (
                 name
                 and len(name) <= 60
@@ -375,7 +374,7 @@ def extract_metadata(md_text: str) -> dict:
     return result
 
 
-async def _extract_llm(md_text: str) -> list:
+async def _extract_llm(md_text: str, llm_semaphore: asyncio.Semaphore | None = None) -> list:
     """
     Trích xuất bằng LLM — fallback khi file không nhận diện được format chuẩn
     (dùng cho pipeline hybrid). Trả về SAME contract với extract_petitions:
@@ -385,7 +384,11 @@ async def _extract_llm(md_text: str) -> list:
     llm_chunking.py). Cảnh báo (VALIDATE/CAN_BANG/MISMATCH...) được in ra
     logger; hàm vẫn trả về list pairs thuần.
     """
-    result = await extract_from_md(md_text, file_name="document")
+    if llm_semaphore is not None:
+        async with llm_semaphore:
+            result = await extract_from_md(md_text, file_name="document")
+    else:
+        result = await extract_from_md(md_text, file_name="document")
     for w in result.get("warnings", []):
         logger.warning(f"      [CẢNH BÁO LLM] {w}")
     return [

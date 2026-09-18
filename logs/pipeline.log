@@ -50,3 +50,70 @@
 2026-09-17 17:26:56 [INFO] [pipeline:76] -   [7710899348fe167e6afabbccae8f3072] OCR status code: 200
 2026-09-17 17:26:56 [INFO] [functions:318] - [classifier] Định dạng văn bản nhận diện được: llm
 2026-09-17 17:26:56 [INFO] [llm:528] - [document] Bắt đầu gọi song song 2 prompt LLM (lần 1/3)...
+2026-09-17 17:40:15 [INFO] [pipeline:76] -   [2a31a2da828f83f0aa6e53c06b7a1cc4] OCR status code: 200
+2026-09-17 17:40:15 [INFO] [functions:318] - [classifier] Định dạng văn bản nhận diện được: f1
+2026-09-17 17:40:22 [INFO] [pipeline:76] -   [e55520a53ede19b463852cd81186c8ce] OCR status code: 200
+2026-09-17 17:40:22 [INFO] [functions:318] - [classifier] Định dạng văn bản nhận diện được: f2
+2026-09-17 17:40:29 [INFO] [pipeline:76] -   [1b26f9f737bb5343b391778bce8c00a0] OCR status code: 200
+2026-09-17 17:40:29 [INFO] [functions:318] - [classifier] Định dạng văn bản nhận diện được: f1
+2026-09-17 17:40:35 [INFO] [pipeline:76] -   [014c37bac9f031e48c8f4a092ca1932f] OCR status code: 200
+2026-09-17 17:40:35 [INFO] [functions:318] - [classifier] Định dạng văn bản nhận diện được: f1
+2026-09-17 17:40:41 [INFO] [pipeline:76] -   [76c9942fd8f029505b5279a9afc8879e] OCR status code: 200
+2026-09-17 17:40:41 [INFO] [functions:318] - [classifier] Định dạng văn bản nhận diện được: f1
+2026-09-17 17:40:48 [INFO] [pipeline:76] -   [ba9f530e3e1a426b4771f429ffa00835] OCR status code: 200
+2026-09-17 17:40:48 [INFO] [functions:318] - [classifier] Định dạng văn bản nhận diện được: f1
+2026-09-17 17:40:48 [INFO] [pipeline:265] -   [pipeline] 30 kiến nghị, 6 file, 7 cặp trích xuất, matched=0, elapsed=38.88s
+2026-09-17 17:49:23 [INFO] [pipeline:76] -   [00a41a34893733469dfc034a08e7cc3e] OCR status code: 200
+2026-09-17 17:49:23 [INFO] [functions:318] - [classifier] Định dạng văn bản nhận diện được: llm
+2026-09-17 17:49:23 [INFO] [llm:528] - [document] Bắt đầu gọi song song 2 prompt LLM (lần 1/3)...
+2026-09-17 17:49:30 [INFO] [pipeline:76] -   [ffa07bc55554a3cf80109378d1899c6b] OCR status code: 200
+2026-09-17 17:49:30 [INFO] [functions:318] - [classifier] Định dạng văn bản nhận diện được: llm
+2026-09-17 17:49:30 [INFO] [llm:528] - [document] Bắt đầu gọi song song 2 prompt LLM (lần 1/3)...
+2026-09-17 17:50:32 [INFO] [pipeline:76] -   [ffa07bc55554a3cf80109378d1899c6b] OCR status code: 200
+2026-09-17 17:50:32 [INFO] [functions:318] - [classifier] Định dạng văn bản nhận diện được: llm
+2026-09-17 17:50:32 [INFO] [llm:528] - [document] Bắt đầu gọi song song 2 prompt LLM (lần 1/3)...
+2026-09-17 17:50:32 [INFO] [pipeline:76] -   [ffa07bc55554a3cf80109378d1899c6b] OCR status code: 200
+2026-09-17 17:50:32 [INFO] [functions:318] - [classifier] Định dạng văn bản nhận diện được: llm
+2026-09-17 17:50:32 [INFO] [llm:528] - [document] Bắt đầu gọi song song 2 prompt LLM (lần 1/3)...
+2026-09-17 17:50:32 [INFO] [llm:548] - [document] LLM extract thành công cân bằng: 1 KN và 1 TL.
+2026-09-17 17:50:32 [INFO] [llm:548] - [document] LLM extract thành công cân bằng: 1 KN và 1 TL.
+2026-09-17 17:50:32 [INFO] [pipeline:265] -   [pipeline] 30 kiến nghị, 2 file, 2 cặp trích xuất, matched=1, elapsed=14.48s
+2026-09-17 17:51:32 [INFO] [pipeline:76] -   [012f07f5252144469835655d68ca09c2] OCR status code: 200
+2026-09-17 17:51:32 [INFO] [functions:318] - [classifier] Định dạng văn bản nhận diện được: llm
+2026-09-17 17:51:32 [INFO] [llm:528] - [document] Bắt đầu gọi song song 2 prompt LLM (lần 1/3)...
+2026-09-17 17:51:32 [INFO] [pipeline:76] -   [fb79da318a6e945bd4300f05419fb580] OCR status code: 200
+2026-09-17 17:51:32 [INFO] [functions:318] - [classifier] Định dạng văn bản nhận diện được: llm
+2026-09-17 17:51:32 [INFO] [llm:528] - [document] Bắt đầu gọi song song 2 prompt LLM (lần 1/3)...
+2026-09-17 17:51:33 [INFO] [llm:548] - [document] LLM extract thành công cân bằng: 1 KN và 1 TL.
+2026-09-17 17:51:33 [INFO] [llm:548] - [document] LLM extract thành công cân bằng: 1 KN và 1 TL.
+2026-09-17 17:51:40 [INFO] [pipeline:76] -   [00a41a34893733469dfc034a08e7cc3e] OCR status code: 200
+2026-09-17 17:51:40 [INFO] [functions:318] - [classifier] Định dạng văn bản nhận diện được: llm
+2026-09-17 17:51:40 [INFO] [llm:528] - [document] Bắt đầu gọi song song 2 prompt LLM (lần 1/3)...
+2026-09-17 17:51:40 [INFO] [llm:548] - [document] LLM extract thành công cân bằng: 1 KN và 1 TL.
+2026-09-17 17:51:40 [INFO] [pipeline:265] -   [pipeline] 30 kiến nghị, 3 file, 3 cặp trích xuất, matched=3, elapsed=21.74s
+2026-09-17 17:53:50 [INFO] [pipeline:76] -   [203de4ffe630a2263ce21e9a6badc44f] OCR status code: 200
+2026-09-17 17:53:50 [INFO] [functions:318] - [classifier] Định dạng văn bản nhận diện được: llm
+2026-09-17 17:53:50 [INFO] [llm:528] - [document] Bắt đầu gọi song song 2 prompt LLM (lần 1/3)...
+2026-09-17 17:53:51 [INFO] [llm:548] - [document] LLM extract thành công cân bằng: 1 KN và 1 TL.
+2026-09-17 17:53:58 [INFO] [pipeline:76] -   [33199679bdb444137871e3fe2a91c11e] OCR status code: 200
+2026-09-17 17:53:58 [INFO] [functions:318] - [classifier] Định dạng văn bản nhận diện được: llm
+2026-09-17 17:53:58 [INFO] [llm:528] - [document] Bắt đầu gọi song song 2 prompt LLM (lần 1/3)...
+2026-09-17 17:53:58 [INFO] [llm:548] - [document] LLM extract thành công cân bằng: 2 KN và 2 TL.
+2026-09-17 17:54:05 [INFO] [pipeline:76] -   [af4e6f57949a113374afa72dd7233fa9] OCR status code: 200
+2026-09-17 17:54:05 [INFO] [functions:318] - [classifier] Định dạng văn bản nhận diện được: llm
+2026-09-17 17:54:05 [INFO] [llm:528] - [document] Bắt đầu gọi song song 2 prompt LLM (lần 1/3)...
+2026-09-17 17:54:05 [INFO] [llm:548] - [document] LLM extract thành công cân bằng: 1 KN và 1 TL.
+2026-09-17 17:54:11 [INFO] [pipeline:76] -   [b8f34874491da521fea545ef9910c0ca] OCR status code: 200
+2026-09-17 17:54:11 [INFO] [functions:318] - [classifier] Định dạng văn bản nhận diện được: llm
+2026-09-17 17:54:11 [INFO] [llm:528] - [document] Bắt đầu gọi song song 2 prompt LLM (lần 1/3)...
+2026-09-17 17:54:11 [INFO] [llm:548] - [document] LLM extract thành công cân bằng: 1 KN và 1 TL.
+2026-09-17 17:54:17 [INFO] [pipeline:76] -   [7710899348fe167e6afabbccae8f3072] OCR status code: 200
+2026-09-17 17:54:17 [INFO] [functions:318] - [classifier] Định dạng văn bản nhận diện được: llm
+2026-09-17 17:54:17 [INFO] [llm:528] - [document] Bắt đầu gọi song song 2 prompt LLM (lần 1/3)...
+2026-09-17 17:54:18 [INFO] [llm:548] - [document] LLM extract thành công cân bằng: 1 KN và 1 TL.
+2026-09-17 17:54:18 [INFO] [pipeline:265] -   [pipeline] 30 kiến nghị, 5 file, 6 cặp trích xuất, matched=6, elapsed=34.35s
+2026-09-18 00:37:27 [INFO] [pipeline:76] -   [e4e04c6055e74ad434d23848ab4321fc] OCR status code: 200
+2026-09-18 00:37:27 [INFO] [functions:318] - [classifier] Định dạng văn bản nhận diện được: f2
+2026-09-18 00:37:27 [INFO] [pipeline:265] -   [pipeline] 116 kiến nghị, 1 file, 5 cặp trích xuất, matched=5, elapsed=7.41s
+2026-09-18 00:50:57 [INFO] [pipeline:269] -   [pipeline] 0 kiến nghị, 0 file, 0 cặp trích xuất, matched=0, elapsed=0.01s
+2026-09-18 00:50:57 [INFO] [pipeline:269] -   [pipeline] 0 kiến nghị, 0 file, 0 cặp trích xuất, matched=0, elapsed=0.01s

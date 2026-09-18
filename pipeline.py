@@ -28,6 +28,7 @@ import httpx
 from config import (
     JACCARD_THRESHOLD,
     JITTER,
+    LLM_CONCURRENCY,
     MAX_CONCURRENCY,
     OCR_MAX_RETRIES,
     OCR_TIMEOUT,
@@ -137,16 +138,17 @@ async def _ocr_extract_one(
     filename: str,
     pdf_bytes: bytes,
     client: httpx.AsyncClient,
-    semaphore: asyncio.Semaphore,
+    ocr_semaphore: asyncio.Semaphore,
+    llm_semaphore: asyncio.Semaphore,
 ) -> dict:
     """OCR 1 file (giới hạn concurrency), extract petitions + metadata."""
-    async with semaphore:
+    async with ocr_semaphore:
         md_text = await _ocr_pdf_async(filename, pdf_bytes, client)
     # Post-OCR làm sạch trước khi trích xuất (OCR bóc footer/chú thích vào nội dung)
     md_text = _fix_ocr_diacritics(md_text)
     md_text = clean_footer(md_text)
-    # Trích xuất petitions thuần async
-    petitions = await extract_petitions(md_text)
+    # Trích xuất petitions thuần async kèm semaphore kiểm soát GPU
+    petitions = await extract_petitions(md_text, llm_semaphore=llm_semaphore)
     return {
         "petitions": petitions,
         "metadata": extract_metadata(md_text),
@@ -161,7 +163,7 @@ async def run_pipeline_async(
     """
     Luồng xử lý đầy đủ cho 1 job:
       1. Đọc tất cả file PDF từ disk (1 file lỗi -> lỗi cả job)
-      2. OCR + extract từng file (giới hạn MAX_CONCURRENCY)
+      2. OCR + extract từng file (giới hạn MAX_CONCURRENCY và LLM_CONCURRENCY)
       3. Gom cặp {noi_dung, tra_loi, file_id, metadata}
       4. Map từng kiến nghị -> câu trả lời Jaccard cao nhất (>= threshold)
     Trả dict đúng response schema.
@@ -184,7 +186,8 @@ async def run_pipeline_async(
             f"{'; '.join(read_errors)}"
         )
 
-    semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
+    ocr_semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
+    llm_semaphore = asyncio.Semaphore(LLM_CONCURRENCY)
     async with httpx.AsyncClient(timeout=OCR_TIMEOUT) as client:
         # 2) OCR + extract từng file
         tasks = [
@@ -192,7 +195,8 @@ async def run_pipeline_async(
                 file_id,
                 pdf_bytes,
                 client,
-                semaphore,
+                ocr_semaphore,
+                llm_semaphore,
             )
             for file_id, pdf_bytes in zip(file_ids, reads)
         ]
