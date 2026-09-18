@@ -35,7 +35,11 @@ from config import (
     OCR_URL,
     RETRY_BACKOFF_BASE,
 )
-from functions import extract_metadata, extract_petitions
+from functions import (
+    extract_donvi_id_from_text,
+    extract_metadata,
+    extract_petitions,
+)
 from logger import get_logger
 from postprocess import _fix_ocr_diacritics, clean_footer
 
@@ -149,9 +153,16 @@ async def _ocr_extract_one(
     md_text = clean_footer(md_text)
     # Trích xuất petitions thuần async kèm semaphore kiểm soát GPU
     petitions = await extract_petitions(md_text, llm_semaphore=llm_semaphore)
+    donvi_id = extract_donvi_id_from_text(md_text)
+    if donvi_id is not None:
+        logger.info(f"  [{filename}] Trích xuất được ID Đoàn ĐBQH: {donvi_id}")
+    else:
+        logger.warning(f"  [{filename}] Không xác định được ID Đoàn ĐBQH từ văn bản.")
+
     return {
         "petitions": petitions,
         "metadata": extract_metadata(md_text),
+        "donvi_id": donvi_id,
     }
 
 
@@ -231,11 +242,39 @@ async def run_pipeline_async(
                 )
             )
 
-    # 4) Map từng kiến nghị đầu vào -> câu trả lời có Jaccard cao nhất
+    # 4) Lọc data_list theo ID Đoàn ĐBQH trích xuất được từ các file PDF (Phương án A)
+    target_donvi_ids = {
+        res["donvi_id"]
+        for res in outcomes
+        if isinstance(res, dict) and res.get("donvi_id") is not None
+    }
+
+    if target_donvi_ids:
+        data_list_to_match = [
+            item
+            for item in data_list
+            if item.get("KN_KIENNGHI.DONVI_TIEPNHAN") in target_donvi_ids
+            or (
+                isinstance(item.get("KN_KIENNGHI.DONVI_TIEPNHAN"), str)
+                and item.get("KN_KIENNGHI.DONVI_TIEPNHAN").isdigit()
+                and int(item.get("KN_KIENNGHI.DONVI_TIEPNHAN")) in target_donvi_ids
+            )
+        ]
+        logger.info(
+            f"  [pipeline] Lọc data_list theo ID Đoàn ĐBQH {target_donvi_ids}: "
+            f"{len(data_list)} -> {len(data_list_to_match)} kiến nghị."
+        )
+    else:
+        data_list_to_match = data_list
+        logger.warning(
+            "  [pipeline] Không trích xuất được ID Đoàn ĐBQH từ file nào, giữ nguyên toàn bộ data_list."
+        )
+
+    # 5) Map từng kiến nghị đầu vào -> câu trả lời có Jaccard cao nhất
     results = []
     matched = 0
 
-    for item in data_list:
+    for item in data_list_to_match:
         noi_dung_kn = item["KN_KIENNGHI.NOI_DUNG"]
         if not pairs:
             answers = []
@@ -267,7 +306,7 @@ async def run_pipeline_async(
         )
 
     logger.info(
-        f"  [pipeline] {len(data_list)} kiến nghị, "
+        f"  [pipeline] {len(data_list_to_match)} kiến nghị (đã lọc từ {len(data_list)}), "
         f"{len(file_ids)} file, {len(pairs)} cặp trích xuất, "
         f"matched={matched}, elapsed={time.monotonic() - start_time:.2f}s"
     )
@@ -276,7 +315,7 @@ async def run_pipeline_async(
         "data_list": results,
         "metadata_all": {
             "matched_count": matched,
-            "unmatched_count": len(data_list) - matched,
+            "unmatched_count": len(data_list_to_match) - matched,
         },
     }
 

@@ -1,6 +1,7 @@
 import asyncio
 import re
 import sys
+import unicodedata
 from pathlib import Path
 
 from config import LLM_CONCURRENCY
@@ -95,6 +96,80 @@ def _extract_bo(line: str) -> str:
 
 
 _MARKERS = ("Đoàn đại biểu Quốc hội tỉnh", "Đoàn đại biểu Quốc hội thành phố")
+
+# ---------------------------------------------------------------------------
+# Tra cứu ID Đơn vị tiếp nhận (tỉnh/thành phố) từ ID_đoàn_ĐB.json
+# ---------------------------------------------------------------------------
+_DONVI_MAP_PATH = Path(__file__).resolve().parent / "ID_đoàn_ĐB.json"
+_NORM_DONVI_MAP: dict[str, int] = {}
+
+
+def _strip_accents_lower(s: str) -> str:
+    """Chuyển text về chữ thường, thay 'đ' thành 'd' và loại bỏ toàn bộ dấu tiếng Việt."""
+    if not s:
+        return ""
+    s = s.lower().replace("đ", "d")
+    s = "".join(
+        c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c)
+    )
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _load_donvi_map() -> dict[str, int]:
+    """Tải và chuẩn hóa từ điển ID_đoàn_ĐB.json vào bộ nhớ."""
+    global _NORM_DONVI_MAP
+    if _NORM_DONVI_MAP:
+        return _NORM_DONVI_MAP
+    if not _DONVI_MAP_PATH.exists():
+        logger.warning(f"[donvi] Không tìm thấy file từ điển {_DONVI_MAP_PATH}")
+        return {}
+    try:
+        import json
+        raw_data = json.loads(_DONVI_MAP_PATH.read_text(encoding="utf-8"))
+        m: dict[str, int] = {}
+        # Sắp xếp các key theo chiều dài giảm dần để ưu tiên khớp tên dài trước
+        for k, v in raw_data.items():
+            norm_k = _strip_accents_lower(k)
+            m[norm_k] = int(v)
+            # Map thêm tên tỉnh ngắn (bỏ tiền tố 'tinh ', 'thanh pho ')
+            short_k = re.sub(r"^(tinh|thanh pho)\s+", "", norm_k)
+            if short_k and short_k != norm_k:
+                m[short_k] = int(v)
+        _NORM_DONVI_MAP = m
+    except Exception as e:
+        logger.error(f"[donvi] Lỗi khi load {_DONVI_MAP_PATH}: {e}")
+    return _NORM_DONVI_MAP
+
+
+def extract_donvi_id_from_text(md_text: str) -> int | None:
+    """
+    Trích xuất tên Đoàn ĐBQH từ văn bản OCR (tìm trong 50 dòng đầu),
+    chuẩn hóa không dấu + lowercase và tra cứu ID trong ID_đoàn_ĐB.json.
+    Trả về ID đơn vị (int) hoặc None nếu không tìm thấy.
+    """
+    donvi_map = _load_donvi_map()
+    if not donvi_map or not md_text:
+        return None
+
+    # Quét 50 dòng đầu (phần header công văn)
+    lines = md_text.splitlines()[:50]
+    
+    # Cách 1: Tìm dòng chứa cụm "đoàn đại biểu quốc hội"
+    for line in lines:
+        norm_line = _strip_accents_lower(line)
+        if "doan dai bieu quoc hoi" in norm_line:
+            # Tra cứu khớp tên tỉnh trong dòng này (ưu tiên tên dài trước)
+            for k in sorted(donvi_map.keys(), key=len, reverse=True):
+                if k in norm_line:
+                    return donvi_map[k]
+
+    # Cách 2: Quét tổng quát trong toàn bộ header
+    full_header_norm = _strip_accents_lower(" ".join(lines))
+    for k in sorted(donvi_map.keys(), key=len, reverse=True):
+        if f"doan dai bieu quoc hoi {k}" in full_header_norm or f"doan dbqh {k}" in full_header_norm:
+            return donvi_map[k]
+
+    return None
 
 
 def _extract_daibieu(line: str) -> str:
