@@ -1,0 +1,164 @@
+# -*- coding: utf-8 -*-
+"""
+Tập hợp REGEX dùng trong pipeline trích xuất kiến nghị Bộ Văn hóa, Thể thao
+và Du lịch.
+
+Khung thư Bộ Văn hóa (giống nhau ở mọi file):
+  - Header: "Số: NNNN /BVHTTDL-VP", "V/v trả lời kiến nghị ...",
+    "Hà Nội, ngày DD tháng MM năm YYYY", "Kính gửi: Đoàn ĐBQH tỉnh/TP X".
+  - Intro: "Bộ Văn hóa, Thể thao và Du lịch nhận được kiến nghị của cử tri ...
+    với nội dung như sau:"  -> biên trên vùng NỘI DUNG (S1).
+  - Mốc trả lời: "Bộ Văn hóa, Thể thao và Du lịch xin trả lời như sau:?"
+    (Tây Ninh thiếu dấu ":") -> biên trên vùng TRẢ LỜI (S2).
+  - Câu kết: "Bộ Văn hóa, Thể thao và Du lịch trân trọng gửi tới
+    Đoàn Đại biểu Quốc hội ... để trả lời cử tri./." (+ số trang / Signature).
+  - Cuối thư: "Nơi nhận:", "BỘ TRƯỞNG", tên người ký.
+
+Format Bộ Văn hóa (khung f1/f2/f3 chung các bộ, tối ưu riêng):
+  - f1: 1 kiến nghị (đoạn văn liền, không đánh số item) + đáp án văn xuôi
+    (đáp án có thể chứa section "1)"/"2)" nội bộ như Hà Nội -> vẫn gộp
+    thành 1 tra_loi duy nhất).
+  - f3: N item kiến nghị "(1)...(N)" / "N)..." trong 1 vùng S1 + N section
+    đáp án "N." / "N)" mở đầu bằng "Liên quan/Về/Đối với" -> map item k
+    với block đáp án k theo THỨ TỰ.
+  - f2 (GROUP header lặp lại, mỗi kiến nghị 1 mục S1+S2 riêng): KHÔNG xuất
+    hiện ở Bộ Văn hóa -> giữ nhãn dự phòng, classify không trả f2.
+  - llm: thiếu intro/mốc trả lời, hoặc số item và số block đáp án lệch nhau.
+
+Quy ước tên:
+  - _INTRO_RE   : dòng intro "... với nội dung như sau:" (biên trên S1)
+  - _S2_MARK_RE : mốc mở đầu phần TRẢ LỜI (biên trên S2)
+  - _S1_ITEM_RE : mốc mở đầu từng kiến nghị "(N)" / "N)" ở đầu dòng (f3)
+  - _ANS_HEAD_RE: mốc mở đầu block TRẢ LỜI "N." / "N)" + keyword (f3)
+  - _CLOSING_RE : câu kết cuối thư (chặn khỏi tra_loi)
+  - _END_RE     : vùng kết thúc thư (Nơi nhận / chữ ký / Lưu)
+
+Tất cả đều dùng cờ re.I (không phân biệt hoa thường) vì OCR thường không
+đồng nhất về chữ hoa/thường.
+"""
+
+import re
+
+# ---------------------------------------------------------------------------
+# Biên trên vùng NỘI DUNG (S1): dòng intro kết thúc bằng
+# "... với nội dung như sau:"
+# ---------------------------------------------------------------------------
+_INTRO_RE = re.compile(r"với nội dung như sau:\s*$", re.I)
+
+# ---------------------------------------------------------------------------
+# Mốc mở đầu phần TRẢ LỜI (S2):
+#   "Bộ Văn hóa, Thể thao và Du lịch xin trả lời như sau:"
+# Dấu ":" cuối là optional (Tây Ninh: "... như sau" không có ":").
+# ---------------------------------------------------------------------------
+_S2_MARK_RE = re.compile(
+    r"Bộ Văn hóa, Thể thao và Du lịch xin trả lời như sau:?\s*$",
+    re.I,
+)
+
+# ---------------------------------------------------------------------------
+# (f3) Mốc mở đầu từng kiến nghị trong vùng S1:
+#   "(1) Cử tri kiến nghị ..."   (Cao Bằng, Hải Phòng, Đồng Tháp)
+#   "1) Cử tri kiến nghị ..."    (An Giang)
+# Neo "^" đầu dòng để KHÔNG bắt các sub-item "(1)", "(2)" lồng GIỮA dòng
+# (vd An Giang item 1 chứa "(1) Sớm ban hành ... (2) Xem xét bố trí ...").
+# Vùng tìm kiếm đã giới hạn (intro, s2mark) nên không dính "(1)"-"_(6)_",
+# "1)"/"2)" nằm trong vùng đáp án.
+# ---------------------------------------------------------------------------
+_S1_ITEM_RE = re.compile(r"^\s*(?:\(\d+\)|\d+\))\s+\S")
+
+# ---------------------------------------------------------------------------
+# (f3) Mốc mở đầu block TRẢ LỜI:
+#   "1. Liên quan đến nội dung kiến nghị ..."   (Cao Bằng)
+#   "## 2. Về kiến nghị ..."                   (Hải Phòng)
+#   "1) Liên quan đến ..."                     (Đồng Tháp, Hà Nội)
+#   "# 2) Liên quan đến ..."                   (An Giang)
+# Bắt buộc có keyword "Liên quan/Về/Đối với" để KHÔNG bắt nhầm:
+#   - sub-item đáp án "(1)"-"_"(6)_" (có ngoặc đơn), "a)"-"_"e)_" (chữ cái);
+#   - bullet "- " / "- - " (OCR tách đôi);
+#   - số trang lẻ ("28") sau câu kết.
+# ---------------------------------------------------------------------------
+_ANS_HEAD_RE = re.compile(
+    r"^\s*[#*_>\s]*\d+[.)]\s+(?:Liên quan|Về|Đối với)\b",
+    re.I,
+)
+
+# ---------------------------------------------------------------------------
+# Mốc câu kết cuối thư (ranh giới cuối tra_loi):
+#   "Bộ Văn hóa, Thể thao và Du lịch trân trọng gửi tới Đoàn Đại biểu
+#    Quốc hội tỉnh/thành phố X để trả lời cử tri./." (+ số trang/Signature)
+# ---------------------------------------------------------------------------
+_CLOSING_RE = re.compile(
+    r"trân trọng gửi tới Đoàn [Đđ]ại biểu Quốc hội.*để trả lời cử tri",
+    re.I,
+)
+
+# ---------------------------------------------------------------------------
+# Mốc kết thúc phần thư (không thuộc nội dung trả lời)
+#   "Nơi nhận:" (### / #### / không heading), "BỘ TRƯỞNG" / "Bộ TRƯỞNG",
+#   "Lưu: ...", "<!-- Start of picture ... -->"
+# ---------------------------------------------------------------------------
+_END_RE = re.compile(
+    r"^\s*[#*_ \s]*?(Nơi nhận|(?:KT\.?\s*)?BỘ TRƯỞNG|Lưu:|<!-- Start of picture)",
+    re.I,
+)
+
+# ---------------------------------------------------------------------------
+# Footer / chú thích cuối trang (footnote) sau OCR.
+# Sau khi OCR, footnote được bóc nhầm vào giữa nội dung và có 2 thành phần:
+#   1. Dấu tham chiếu TRONG văn bản: "<sup>1</sup>", "²", "¹", "³", ... -> sẽ bị
+#      XÓA khỏi text (không phải nội dung chính).
+#   2. Dòng footer GIẢI THÍCH ở cuối trang, bắt đầu bằng "<sup>N</sup>" (thường bị
+#      OCR bọc thêm "*") -> những dòng này sẽ bị LOẠI BỎ hoàn toàn.
+# Yêu cầu bắt buộc có thẻ "<sup>" ở đầu dòng để KHÔNG nhầm với các dòng danh sách
+# đánh số "1. ...", "2. ..." trong nội dung.
+# ---------------------------------------------------------------------------
+_FOOTNOTE_LINE_RE = re.compile(
+    r"^\s*\*{0,2}<sup>\s*(?:\[\d+\]|\d{1,2})\s*</sup>",
+    re.I,
+)
+
+_SUP_REF_RE = re.compile(
+    r"<sup>\s*(?:\[\d+\]|\d{1,2})\s*</sup>|[\u00B2\u00B3\u00B9\u2070-\u2079]",
+    re.I,
+)
+
+# ---------------------------------------------------------------------------
+# Metadata: Số công văn (trong dòng "Số: ...")
+# Các biến thể OCR thường gặp ở Bộ Văn hóa:
+#   "**Số:** 4974 /**BVHTTDL-VP**"   (bold quanh nhãn + suffix: "**" dính
+#                                    ngay sau "/", 6/10 file dùng dạng này)
+#   "Số: 4973/BVHTTDL-VP"            (không space, không bold)
+#   "**Số:4970 /BVHTTDL-VP**"        (dính "Số:" với số, có space trước "/")
+#   "**Số:4971 /BVHTTDL-VP**"
+# ^ đầu dòng: cho phép tiền tố heading "#", bold "*"; dấu ":" optional.
+# \*{0,2} sau "/" để chịu "**" bọc suffix (".../ **BVHTTDL-VP**"); cleanup
+# ở extract_metadata đã xóa "*" nên thêm vào đây là an toàn.
+# Dừng trước "V/v" hoặc hết dòng; trailing "**" được loại bằng \*{0,2}.
+# ---------------------------------------------------------------------------
+_SO_CONG_VAN_RE = re.compile(
+    r"^\s*[#*_>\s]*\*{0,2}Số\*{0,2}\s*[:\-]?\s*\*{0,2}\s*([\d]*\s*/\*{0,2}[A-Za-z0-9Đđ\-\&()_.]+(?:\s*[A-Za-z0-9Đđ\-\&()_.]+)*)\*{0,2}(?=\s*V/v|\s*$)",
+    re.I | re.M,
+)
+
+# ---------------------------------------------------------------------------
+# Metadata: Ngày ban hành (dòng "Hà Nội, ngày DD tháng MM năm YYYY")
+# Biến thể: "*Hà Nội, ngày07 tháng 8 năm 2026*" (Đồng Tháp: mất space sau
+# "ngày") -> [\s_]* sau "ngày" chịu được dính số.
+# ---------------------------------------------------------------------------
+_NGAY_BAN_HANH_RE = re.compile(
+    r"_?Hà Nội,[\s_]*ngày[\s_]*\*{0,2}(\d{1,2})\*{0,2}[\s_]*tháng[\s_]*(?:(\d{1,2})[\s_]*)?năm[\s_]*(\d{4})",
+    re.I,
+)
+
+# ---------------------------------------------------------------------------
+# Metadata: Người ký ("BỘ TRƯỞNG [Tên]" hoặc chỉ "BỘ TRƯỞNG")
+# Các dạng ở Bộ Văn hóa:
+#   - "## Lâm Thị Phương Thanh" sau "## BỘ TRƯỞNG" (có tên dòng riêng)
+#   - "*## Lâm Thị Phương Thanh*" (italic + heading)
+#   - thiếu tên (Đà Nẵng, Hà Nội: kết thúc ở "## BỘ TRƯỞNG"/"## Bộ TRƯỞNG")
+# Tên không chứa ký tự "<" để không nuốt tag HTML; lookahead chấp nhận "<".
+# ---------------------------------------------------------------------------
+_NGUOI_KY_RE = re.compile(
+    r"(?:\*\*)?BỘ\s+TRƯỞNG(?:\s+([^\n\r\*<]+?))?(?:\*\*)?(?=\s*(?:\n|<|Nơi nhận|$))",
+    re.I,
+)
