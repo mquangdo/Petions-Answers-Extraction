@@ -425,14 +425,14 @@ def extract_metadata(md_text: str) -> dict:
         d, mo, y = m.group(1), m.group(2), m.group(3)
         result["ngay_ban_hanh"] = f"{int(d):02d}/{int(mo):02d}/{y}"
 
-    # 3. Người ký: tìm block "BỘ TRƯỞNG" / "THỨ TRƯỞNG" -> dòng hoa liền kề
-    m = _NGUOI_KY_RE.search(md_text)
-    if m:
-        # Lấy tối đa 10 dòng sau chức danh để tìm dòng họ tên (chữ HOA hoàn toàn)
-        tail = md_text[m.end() : m.end() + 600]
+    # 3. Người ký: chỉ tìm trong 40 dòng CUỐI (vùng chữ ký), tránh bắt nhầm
+    #    "của Bộ trưởng ..." trong thân thư.
+    tail = "\n".join(md_text.splitlines()[-40:])
+    matches = list(_NGUOI_KY_RE.finditer(tail))
+    if matches:
         chosen = None
-        for line in tail.splitlines()[:10]:
-            name = _extract_signer_name(line)
+        for m in matches:
+            name = (m.group(1) or "").strip()
             if (
                 name
                 and len(name) <= 60
