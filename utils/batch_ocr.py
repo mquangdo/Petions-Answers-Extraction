@@ -2,11 +2,7 @@
 """
 OCR hàng loạt file .pdf từ input folder, lưu kết quả .md vào output folder.
 
-Sử dụng Standalone OCR mới (Canonical Tree JSON v1.0.0 — xem
-docs/standalone_ocr_api_specs.md), async, có retry + backoff + concurrency
-control. Hướng A: dựng lại markdown CÓ CẤU TRÚC (#, **) qua
-POST /v1/ocr/render để tuyến regex/modules phía sau ăn được; render lỗi
--> fallback về text thuần "content" (không bao giờ tệ hơn trước).
+Sử dụng OCR server (async, có retry + backoff + concurrency control).
 
 Cách chạy:
     python batch_ocr.py -i input_pdfs -o output_md
@@ -33,12 +29,7 @@ from postprocess import _fix_ocr_diacritics, clean_footer
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-# Standalone OCR mới (Canonical Tree JSON v1.0.0):
-#   1. POST /v1/ocr/documents -> canonical JSON (field "content" là text thuần,
-#      KHÔNG có marker markdown).
-#   2. POST /v1/ocr/render (format=markdown) -> markdown có cấu trúc (#, **).
-OCR_URL = "https://8085--main--dev--sinhnq3.coder.vts-ai.space/v1/ocr/documents"
-RENDER_URL = "https://8085--main--dev--sinhnq3.coder.vts-ai.space/v1/ocr/render"
+OCR_URL = "https://8078--main--dev--sinhnq3.coder.vts-ai.space/step1/ocr"
 
 JITTER = 1.0
 MAX_RETRIES = 5
@@ -46,8 +37,6 @@ RETRY_BACKOFF_BASE = 3
 RETRYABLE_CODES = {429, 500, 502, 503, 504}
 DEFAULT_CONCURRENCY = 3
 OCR_TIMEOUT = 300
-RENDER_TIMEOUT = 60      # giây; render không chạy lại OCR nên nhanh
-RENDER_MAX_RETRIES = 3   # số lần thử lại cho bước render
 
 
 # ---------------------------------------------------------------------------
@@ -57,13 +46,8 @@ async def _ocr_pdf_async(
     filename: str,
     pdf_bytes: bytes,
     client: httpx.AsyncClient,
-) -> dict:
-    """Gọi /v1/ocr/documents cho 1 file PDF (async, có retry + backoff).
-
-    Trả về nguyên dict canonical JSON (schema v1.0.0). Field "content" bên
-    trong là text thuần (không marker) — bước render sau sẽ dựng markdown
-    có cấu trúc từ dict này.
-    """
+) -> str:
+    """Gọi OCR server cho 1 file PDF (async, có retry + backoff). Trả markdown."""
     last_err = None
     for attempt in range(1, MAX_RETRIES + 1):
         try:
@@ -73,11 +57,8 @@ async def _ocr_pdf_async(
                     "file": (filename, pdf_bytes, "application/pdf")
                 },
                 data={
-                    "rasterize": "true",
-                    "enable_correction": "true",
-                    "process_table": "false",
-                    "use_celery": "true",
-                    "use_cache": "false",
+                    "use_celery": "false",
+                    "log_dir": "string",
                 },
             )
 
@@ -89,11 +70,8 @@ async def _ocr_pdf_async(
                 raise RuntimeError(response.text)
 
             result = response.json()
-            if not isinstance(result, dict) or "content" not in result:
-                raise ValueError(
-                    "Response /v1/ocr/documents thiếu field 'content'"
-                )
-            return result
+            text = result["pdf_content"]
+            return text.replace("\\n", "\n")
 
         except (httpx.HTTPError, RuntimeError, ValueError) as e:
             last_err = e
@@ -109,96 +87,17 @@ async def _ocr_pdf_async(
     raise last_err
 
 
-def _has_structure(text: str) -> bool:
-    """Markdown có cấu trúc không (dòng heading '#' hoặc marker '**')."""
-    if "**" in text:
-        return True
-    return any(line.lstrip().startswith("#") for line in text.splitlines())
-
-
-async def _render_markdown_async(
-    filename: str,
-    canonical: dict,
-    client: httpx.AsyncClient,
-) -> str:
-    """Gọi /v1/ocr/render dựng markdown có cấu trúc từ canonical JSON.
-
-    Render không chạy lại OCR nên nhanh (timeout riêng ngắn). Trả về
-    markdown (literal \\n đã đổi thành newline thật). Hết retry mà vẫn
-    lỗi -> ném exception để caller fallback về canonical["content"].
-    """
-    last_err = None
-    for attempt in range(1, RENDER_MAX_RETRIES + 1):
-        try:
-            response = await client.post(
-                RENDER_URL,
-                json={
-                    "canonical": canonical,
-                    "options": {
-                        "format": "markdown",
-                        "include_tables": True,
-                        "include_footnotes": True,
-                    },
-                },
-                timeout=RENDER_TIMEOUT,
-            )
-
-            if response.status_code in RETRYABLE_CODES:
-                raise RuntimeError(
-                    f"HTTP {response.status_code} (có thể bị chặn/quá tải)"
-                )
-            if response.status_code >= 400:
-                raise RuntimeError(response.text)
-
-            result = response.json()
-            text = result.get("content") or ""
-            if not text.strip():
-                raise ValueError("Response /v1/ocr/render trả content rỗng")
-            return text.replace("\\n", "\n")
-
-        except (httpx.HTTPError, RuntimeError, ValueError) as e:
-            last_err = e
-            if attempt == RENDER_MAX_RETRIES:
-                break
-            wait = RETRY_BACKOFF_BASE * (2 ** (attempt - 1)) + random.uniform(0, JITTER)
-            print(
-                f"  [{filename}] Render retry {attempt}/{RENDER_MAX_RETRIES - 1} "
-                f"sau {wait:.1f}s (lỗi: {e})"
-            )
-            await asyncio.sleep(wait)
-
-    raise last_err
-
-
 async def _ocr_one_file(
     pdf_path: Path,
     out_path: Path,
     client: httpx.AsyncClient,
     semaphore: asyncio.Semaphore,
 ) -> tuple[Path, bool, str]:
-    """OCR 1 file (giới hạn concurrency), render markdown rồi ghi ra out_path."""
+    """OCR 1 file (giới hạn concurrency) rồi ghi markdown ra out_path."""
     async with semaphore:
         try:
             pdf_bytes = pdf_path.read_bytes()
-            canonical = await _ocr_pdf_async(pdf_path.name, pdf_bytes, client)
-            try:
-                md_text = await _render_markdown_async(
-                    pdf_path.name, canonical, client
-                )
-                if not _has_structure(md_text):
-                    raise ValueError(
-                        "Markdown render thiếu marker cấu trúc (#/**)"
-                    )
-                via = "render"
-            except Exception as e:
-                # Fallback an toàn: text thuần (không marker) — không tệ hơn
-                # hành vi trước đây (lấy thẳng canonical["content"]).
-                print(
-                    f"  [{pdf_path.name}] Render thất bại ({e}) "
-                    "-> fallback content thuần."
-                )
-                md_text = (canonical.get("content") or "").replace("\\n", "\n")
-                via = "fallback"
+            md_text = await _ocr_pdf_async(pdf_path.name, pdf_bytes, client)
         except Exception as e:
             return pdf_path, False, str(e)
 
@@ -208,7 +107,6 @@ async def _ocr_one_file(
     md_text = _fix_ocr_diacritics(md_text)
     md_text = clean_footer(md_text)
     out_path.write_text(md_text, encoding="utf-8")
-    print(f"  [{via}] {pdf_path.name}")
     return pdf_path, True, ""
 
 
