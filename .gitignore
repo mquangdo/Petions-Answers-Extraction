@@ -4,6 +4,8 @@ data/
 extract/
 request_samples/
 uploaded_files/
+data_markdown/
+extract_answer_result/
 
 worker.log
 vlegal.dump
