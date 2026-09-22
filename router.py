@@ -10,7 +10,7 @@ modules/<mã>/ -> trích xuất.
 - KHÔNG fallback root: Bộ lạ / không detect được -> mặc định "Bộ Y tế"
   (module yt). Module lỗi/trả rỗng -> kết quả rỗng (không bao giờ nổ job).
 
-Preload: toàn bộ 10 module được load 1 lần lúc import (single-threaded,
+Preload: toàn bộ 12 module được load 1 lần lúc import (single-threaded,
 trước khi worker spawn thread) nên runtime chỉ đọc dict cache — không lock,
 không race sys.modules. Module nào load lỗi thì bỏ qua (coi như chưa load).
 """
@@ -53,8 +53,24 @@ _BO_NAMES = (
     "Ủy ban Dân nguyện và Giám sát",
 )
 
-# TẠM THỜI bỏ qua khi detect: cơ quan chuyển kiến nghị (không phải cơ quan
-# ban hành, không có module riêng) — gặp thì quét tiếp dòng sau thay vì chốt.
+# Cơ quan ngoài Bộ có module riêng, tên không nằm trong _BO_NAMES nên phải
+# detect riêng (cả đường chính xác lẫn đường lột dấu):
+#   - UBTWMTTQ: intro/body ghi tắt "Ủy ban Trung ương MTTQ ..."; letterhead
+#     hay bị OCR sai dấu ("MĂT TRẬN TÔ QUÔC") nên thêm bản đầy đủ
+#     "Ủy ban Trung ương Mặt trận Tổ quốc" để đường lột dấu bắt được.
+#   - TANDTC: letterhead OCR sai ("TÔI/TỔI CAO") nhưng intro/body ghi chuẩn
+#     "Tòa án nhân dân tối cao".
+_EXTRA_NAMES = (
+    "Ủy ban Trung ương MTTQ",
+    "Ủy ban Trung ương Mặt trận Tổ quốc",
+    "Tòa án nhân dân tối cao",
+)
+
+# Bỏ qua khi detect: "Ủy ban Dân nguyện và Giám sát" là đơn vị CHUYỂN/NHẬN
+# kiến nghị (Kính gửi + "Phúc đáp Công văn số 498/UBDNGS16..."), xuất hiện
+# SỚM trong mọi thư nhưng KHÔNG phải cơ quan ban hành. Không skip thì nó
+# thắng first-match và hijack toàn bộ file có letterhead nát (đã đo: 36 file
+# route nhầm, BTCTW mất 24→9 petition). Gặp tên này thì quét tiếp dòng sau.
 _SKIP_MINISTRIES = ("Ủy ban Dân nguyện và Giám sát",)
 
 # Bảng map cứng: tên cơ quan chuẩn (có dấu) -> mã module trong modules/.
@@ -71,6 +87,9 @@ MINISTRY_TO_MODULE = {
     "Bộ Công Thương": "ct",
     "Bộ Y tế": "yt",
     "Ban Tổ chức Trung ương": "btctw",
+    "Ủy ban Trung ương MTTQ": "ubtwmttq",
+    "Ủy ban Trung ương Mặt trận Tổ quốc": "ubtwmttq",
+    "Tòa án nhân dân tối cao": "tandtc",
 }
 
 DEFAULT_MINISTRY = "Bộ Y tế"
@@ -91,7 +110,9 @@ def _strip_accents_lower(s: str) -> str:
 
 
 # Tên chuẩn hóa (lột dấu) để match tolerant khi OCR lỗi dấu tên Bộ.
-_NORM_NAMES = {_strip_accents_lower(n): n for n in _BO_NAMES}
+# Gộp cả _EXTRA_NAMES để letterhead OCR nát (vd "MĂT TRẬN TÔ QUÔC",
+# "TÒA ÁN NHÂN DÂN TÔI CAO") vẫn bắt được qua đường lột dấu.
+_NORM_NAMES = {_strip_accents_lower(n): n for n in _BO_NAMES + _EXTRA_NAMES}
 _NORM_MODULE = {_strip_accents_lower(k): v for k, v in MINISTRY_TO_MODULE.items()}
 _SKIP_NORM = {_strip_accents_lower(s) for s in _SKIP_MINISTRIES}
 
@@ -99,10 +120,11 @@ _SKIP_NORM = {_strip_accents_lower(s) for s in _SKIP_MINISTRIES}
 def detect_ministry(md_text: str) -> str | None:
     """Detect tên cơ quan ban hành từ vùng letterhead (30 dòng đầu).
 
-    Đường 1 (chính xác): khớp tên chuẩn trên từng dòng (logic _extract_bo).
-    Đường 2 (tolerant): match tên đã lột dấu khi OCR làm sai dấu tên Bộ.
-    Tên trong skip-list thì quét tiếp dòng sau. Trả tên chuẩn có dấu,
-    hoặc None khi không thấy.
+    Quét từng dòng từ trên xuống, trả tên ĐẦU TIÊN khớp dict (đường chính
+    xác trước, đường lột dấu sau). Ngoại lệ duy nhất: tên trong skip-list
+    (đơn vị chuyển/nhận, vd UBDNGS) thì bỏ qua, quét tiếp — vì nó luôn đứng
+    trước tên cơ quan ban hành trong Kính gửi/Phúc đáp. Trả tên chuẩn có
+    dấu, hoặc None khi không thấy.
     """
     if not md_text:
         return None
@@ -111,6 +133,10 @@ def detect_ministry(md_text: str) -> str | None:
             continue
         low = line.lower()
         for name in _BO_NAMES:
+            if name.lower() in low:
+                if _strip_accents_lower(name) not in _SKIP_NORM:
+                    return name
+        for name in _EXTRA_NAMES:
             if name.lower() in low:
                 if _strip_accents_lower(name) not in _SKIP_NORM:
                     return name
