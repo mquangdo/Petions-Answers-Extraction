@@ -108,14 +108,25 @@ async def ocr_document(
     """
     t0 = time.monotonic()
     filename = file.filename or "upload.pdf"
-    if not filename.lower().endswith(".pdf"):
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail=f"File '{filename}' rỗng.")
+
+    # Validate BẢN CHẤT PDF (không đòi đuôi tên file): pipeline gửi file_id
+    # trần (hash không đuôi, vd 'c3a69c91...') làm filename nên check đuôi sẽ
+    # chặn oan 100% request. Thứ tự: magic bytes %PDF- trước, rồi tới
+    # content-type do client khai báo, cuối cùng mới tới đuôi file.
+    content_type = (file.content_type or "").lower()
+    is_pdf = (
+        data.startswith(b"%PDF-")
+        or content_type == "application/pdf"
+        or filename.lower().endswith(".pdf")
+    )
+    if not is_pdf:
         raise HTTPException(
             status_code=415,
             detail=f"File '{filename}' không đúng định dạng application/pdf.",
         )
-    data = await file.read()
-    if not data:
-        raise HTTPException(status_code=400, detail=f"File '{filename}' rỗng.")
 
     sha = _sha256(data)
     doc_id = f"doc_{sha[:12]}"
