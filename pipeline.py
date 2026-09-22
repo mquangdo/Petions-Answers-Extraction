@@ -26,6 +26,7 @@ import unicodedata
 import httpx
 
 from config import (
+    ENABLE_MINISTRY_ROUTER,
     JACCARD_THRESHOLD,
     JITTER,
     LLM_CONCURRENCY,
@@ -37,11 +38,12 @@ from config import (
 )
 from functions import (
     extract_donvi_id_from_text,
-    extract_metadata,
-    extract_petitions,
+    extract_metadata as root_extract_metadata,
+    extract_petitions as root_extract_petitions,
 )
 from logger import get_logger
 from postprocess import _fix_ocr_diacritics, clean_footer
+from router import route_extract
 
 logger = get_logger("pipeline", "pipeline.log")
 
@@ -151,8 +153,22 @@ async def _ocr_extract_one(
     # Post-OCR làm sạch trước khi trích xuất (OCR bóc footer/chú thích vào nội dung)
     md_text = _fix_ocr_diacritics(md_text)
     md_text = clean_footer(md_text)
-    # Trích xuất petitions thuần async kèm semaphore kiểm soát GPU
-    petitions = await extract_petitions(md_text, llm_semaphore=llm_semaphore)
+    # Route theo Bộ: module regex chuyên biệt (fallback root generic).
+    # Tắt bằng ENABLE_MINISTRY_ROUTER=false -> chạy thẳng bộ root như cũ.
+    if ENABLE_MINISTRY_ROUTER:
+        routed = await route_extract(
+            md_text, llm_semaphore=llm_semaphore, filename=filename,
+        )
+        petitions = routed["petitions"]
+        file_metadata = routed["metadata"]
+        file_ministry = routed["ministry"]
+        file_module = routed["module"]
+    else:
+        # Trích xuất petitions thuần async kèm semaphore kiểm soát GPU
+        petitions = await root_extract_petitions(md_text, llm_semaphore=llm_semaphore)
+        file_metadata = root_extract_metadata(md_text)
+        file_ministry = None
+        file_module = "root"
     donvi_id = extract_donvi_id_from_text(md_text)
     if donvi_id is not None:
         logger.info(f"  [{filename}] Trích xuất được ID Đoàn ĐBQH: {donvi_id}")
@@ -161,8 +177,10 @@ async def _ocr_extract_one(
 
     return {
         "petitions": petitions,
-        "metadata": extract_metadata(md_text),
+        "metadata": file_metadata,
         "donvi_id": donvi_id,
+        "ministry": file_ministry,
+        "module": file_module,
     }
 
 

@@ -5,7 +5,6 @@ import unicodedata
 from pathlib import Path
 
 from config import LLM_CONCURRENCY
-from llm_chunking import extract_from_md
 from logger import get_logger
 from postprocess import postprocess_noi_dung, postprocess_tra_loi
 
@@ -84,6 +83,8 @@ _BO_NAMES = (
     "Bộ Quốc phòng",
     "Bộ Công an",
     "Bộ Ngoại giao",
+    "Ban tổ chức Trung ương",
+    "Ủy ban Dân nguyện và Giám sát",
 )
 
 
@@ -92,7 +93,7 @@ def _extract_bo(line: str) -> str:
     for name in _BO_NAMES:
         if name.lower() in low:
             return name
-    return ""
+    return "Bộ Y tế"
 
 
 _MARKERS = ("Đoàn đại biểu Quốc hội tỉnh", "Đoàn đại biểu Quốc hội thành phố")
@@ -385,8 +386,8 @@ async def extract_petitions(md_text: str, llm_semaphore: asyncio.Semaphore | Non
     Trả về danh sách petition {"noi_dung", "tra_loi"}.
 
     - f1/f2/f3: xử lý bằng regex (_extract_f1/f2/f3).
-    - "llm" (không nhận diện được 3 format chuẩn): xử lý bằng LLM
-      (_extract_llm, semantic chunking — 2 LLM calls, cần openai + network).
+    - "llm" (không nhận diện được 3 format chuẩn): _extract_llm HIỆN TẮT,
+      trả 1 petition rỗng (không gọi LLM).
 
     LƯU Ý: text đầu vào phải là markdown đã qua post-OCR
     (postprocess.clean_footer + _fix_ocr_diacritics) — do bước OCR đảm nhận.
@@ -451,25 +452,14 @@ def extract_metadata(md_text: str) -> dict:
 
 async def _extract_llm(md_text: str, llm_semaphore: asyncio.Semaphore | None = None) -> list:
     """
-    Trích xuất bằng LLM — fallback khi file không nhận diện được format chuẩn
-    (dùng cho pipeline hybrid). Trả về SAME contract với extract_petitions:
-    list[{"noi_dung", "tra_loi"}].
-
-    LƯU Ý: mỗi lần gọi thực hiện 2 LLM calls (semantic chunking — xem
-    llm_chunking.py). Cảnh báo (VALIDATE/CAN_BANG/MISMATCH...) được in ra
-    logger; hàm vẫn trả về list pairs thuần.
+    Fallback khi file không nhận diện được format chuẩn. HIỆN TẮT: luôn trả
+    1 petition rỗng (không gọi LLM — tiết kiệm GPU/thời gian, job không bao
+    giờ chết vì lỗi LLM). Giữ nguyên signature + contract list[{"noi_dung",
+    "tra_loi"}] để caller (extract_petitions) không phải sửa.
+    Muốn bật lại semantic chunking thì khôi phục body cũ (llm_chunking).
     """
-    if llm_semaphore is not None:
-        async with llm_semaphore:
-            result = await extract_from_md(md_text, file_name="document")
-    else:
-        result = await extract_from_md(md_text, file_name="document")
-    for w in result.get("warnings", []):
-        logger.warning(f"      [CẢNH BÁO LLM] {w}")
-    return [
-        {"noi_dung": kn, "tra_loi": tl}
-        for kn, tl in zip(result.get("kien_nghi", []), result.get("tra_loi", []))
-    ]
+    logger.info("[llm-fallback] tắt: trả petition rỗng, không gọi LLM")
+    return [{"noi_dung": "", "tra_loi": ""}]
 
 
 if __name__ == "__main__":

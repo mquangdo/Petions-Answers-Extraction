@@ -52,3 +52,10 @@ LLM_CONCURRENCY = int(os.environ.get("LLM_CONCURRENCY", "1"))
 
 # Business Logic Thresholds
 JACCARD_THRESHOLD = float(os.environ.get("JACCARD_THRESHOLD", "0.5"))
+
+# Ministry router (router.py): detect tên Bộ -> module regex chuyên biệt.
+# false = tắt router, pipeline chạy thẳng bộ generic root (kill-switch).
+ENABLE_MINISTRY_ROUTER = (
+    os.environ.get("ENABLE_MINISTRY_ROUTER", "true").strip().lower()
+    not in ("0", "false", "no", "off")
+)

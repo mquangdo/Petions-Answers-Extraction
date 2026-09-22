@@ -4,28 +4,37 @@ Mock Standalone OCR Service — CHỈ dùng dev/test, KHÔNG chạy OCR thật.
 
 - 1 endpoint duy nhất: POST /step1/ocr (khớp consumer utils/batch_ocr_sync.py,
   response đúng 1 field `pdf_content`).
-- Request body: duy nhất 1 file PDF (multipart field `file`).
-- Stateless hoàn toàn (KHÔNG cache): nhận PDF -> SHA-256 bytes (để map
-  input <-> output qua document_id + log) -> resolve .md trực tiếp
-  (.md thật pair theo stem tên file trong data_markdown/, hoặc canned mẫu)
-  -> trả {"pdf_content"} ngay.
+- Request body: 1 file PDF (multipart `file`) + 2 form fields dummy
+  `use_celery`/`log_dir` (giữ cho đủ contract pipeline.py::_ocr_pdf_async —
+  mock nhận rồi bỏ qua).
+- Map THUẦN NỘI DUNG: nhận PDF -> SHA-256 bytes -> tra bảng dựng sẵn
+  hash_table.json ({sha256: markdown}, sinh bởi build_hash_table.py từ cặp
+  PDF trong data/ <-> .md trong data_markdown/) -> HIT trả .md ngay,
+  MISS (file lạ) trả canned mẫu. Tên file hoàn toàn vô nghĩa: đổi tên PDF
+  vẫn ra đúng .md, PDF trùng nội dung chung 1 entry.
+- Server read-only (không ghi disk runtime), stateless.
 
 Chạy (từ trong folder ocr_service/):
-    uvicorn mock_ocr_server:app --host 0.0.0.0 --port 8085
+    1. Dựng bảng 1 lần (lúc deploy / khi data đổi):
+           python build_hash_table.py   # chạy từ repo root: python ocr_service/build_hash_table.py
+    2. Chạy service:
+           uvicorn mock_ocr_server:app --host 0.0.0.0 --port 8085
 Swagger:
     http://localhost:8085/docs  (1 ô upload file duy nhất)
 """
 
 import hashlib
+import json
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 
 BASE_DIR = Path(__file__).resolve().parent
-# Nguồn .md thật để pair theo stem tên file upload (vd "an giang_106.pdf"
-# -> data_markdown/<Bộ>/an giang_106.md). Không có -> dùng canned.
-MD_SOURCE_DIR = BASE_DIR.parent / "data_markdown"
+# Bảng {sha256(PDF bytes): nội dung .md} dựng sẵn bởi build_hash_table.py.
+# Tái tạo được, vài MB -> gitignored, không commit. Thiếu file -> server vẫn
+# chạy, mọi request rớt canned (log cảnh báo lúc startup).
+HASH_TABLE_PATH = BASE_DIR / "hash_table.json"
 
 # Markdown mẫu khi không pair được .md thật. Có sẵn mốc S1/S2 để tuyến
 # regex/modules ăn được ngay. Ghi rõ là MOCK để không lẫn văn bản thật.
@@ -54,31 +63,48 @@ Bộ Nông nghiệp và Môi trường trân trọng gửi Đoàn đại biểu 
 Nguyễn Văn Mock
 """
 
-app = FastAPI(title="Mock OCR Service", version="0.2.0")
+app = FastAPI(title="Mock OCR Service", version="0.3.0")
 
 
 def _sha256(data: bytes) -> str:
-    """SHA-256 hex của bytes file gốc — map input <-> output qua document_id."""
+    """SHA-256 hex của bytes file gốc — key duy nhất map input <-> output."""
     return hashlib.sha256(data).hexdigest()
 
 
-def _find_real_md(stem: str) -> Path | None:
-    """Tìm <stem>.md (không phân biệt hoa/thường) trong MD_SOURCE_DIR."""
-    if not MD_SOURCE_DIR.is_dir():
-        return None
-    target = stem.lower()
-    for sub in sorted(p for p in MD_SOURCE_DIR.iterdir() if p.is_dir()):
-        for f in sub.iterdir():
-            if f.is_file() and f.suffix.lower() == ".md" and f.stem.lower() == target:
-                return f
-    return None
+def _load_table() -> dict:
+    """Load bảng hash dựng sẵn (1 lần lúc import). Thiếu file -> dict rỗng."""
+    try:
+        with open(HASH_TABLE_PATH, encoding="utf-8") as fh:
+            table = json.load(fh)
+        print(f"[mock] load {len(table)} entry từ {HASH_TABLE_PATH}")
+        return table
+    except FileNotFoundError:
+        print(
+            f"[mock] CẢNH BÁO: chưa có {HASH_TABLE_PATH} "
+            "(chạy python build_hash_table.py để dựng) — mọi request rớt canned."
+        )
+        return {}
+    except (OSError, ValueError) as e:
+        print(f"[mock] CẢNH BÁO: không đọc được bảng hash ({e}) — dùng canned.")
+        return {}
+
+
+HASH_TABLE = _load_table()
 
 
 @app.post("/step1/ocr")
-async def ocr_document(file: UploadFile = File(...)):
-    """Nhận 1 file PDF -> tính hash -> resolve .md trực tiếp -> trả ngay.
+async def ocr_document(
+    file: UploadFile = File(...),
+    use_celery: str = Form("false"),
+    log_dir: str = Form("string"),
+):
+    """Nhận 1 file PDF -> SHA-256 bytes -> tra bảng dựng sẵn -> trả ngay.
 
     Trả về duy nhất {"pdf_content": "<markdown>"} (khớp consumer cũ).
+    Tên file vô nghĩa: đổi tên PDF vẫn ra đúng .md (map thuần nội dung).
+
+    `use_celery` / `log_dir`: giữ cho đủ contract với pipeline.py::_ocr_pdf_async
+    (gửi "false"/"string") — mock NHẬN RỒI BỎ QUA, chỉ log lại.
     """
     t0 = time.monotonic()
     filename = file.filename or "upload.pdf"
@@ -94,17 +120,27 @@ async def ocr_document(file: UploadFile = File(...)):
     sha = _sha256(data)
     doc_id = f"doc_{sha[:12]}"
 
-    src = _find_real_md(Path(filename).stem)
-    if src is not None:
-        md_text = src.read_text(encoding="utf-8")
-        via = f"file:{src.parent.name}"
-    else:
+    md_text = HASH_TABLE.get(sha)
+    via = "table" if md_text is not None else "canned"
+    if md_text is None:
         md_text = CANNED_MD
-        via = "canned"
 
     elapsed_ms = (time.monotonic() - t0) * 1000
     print(
         f"[{doc_id}] {filename} ({len(data) / 1048576:.1f}MB) "
-        f"-> {via}, {len(md_text)} chars, {elapsed_ms:.0f}ms"
+        f"-> {via}, {len(md_text)} chars, {elapsed_ms:.0f}ms "
+        f"(use_celery={use_celery} log_dir={log_dir})"
     )
     return {"pdf_content": md_text}
+
+
+if __name__ == "__main__":
+    # Cho phép: python ocr_service/mock_ocr_server.py  (chạy từ repo root,
+    # tương đương lệnh uvicorn bên dưới; BASE_DIR dùng .resolve() nên đúng
+    # mọi CWD).
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=8085)
+
+
+print(BASE_DIR)
