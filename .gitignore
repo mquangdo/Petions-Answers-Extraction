@@ -6,7 +6,9 @@ request_samples/
 uploaded_files/
 data/
 data_markdown/
+data_markdown_new/
 extract_answer_result/
+test/
 
 worker.log
 vlegal.dump
