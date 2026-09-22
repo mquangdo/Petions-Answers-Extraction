@@ -74,9 +74,9 @@ async def _ocr_pdf_async(
                 },
                 data={
                     "rasterize": "true",
-                    "enable_correction": "true",
+                    "enable_correction": "false",
                     "process_table": "false",
-                    "use_celery": "true",
+                    "use_celery": "false",
                     "use_cache": "false",
                 },
             )
