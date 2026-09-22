@@ -22,8 +22,13 @@ import re
 # Dòng tiêu đề phần trả lời của thư, ví dụ:
 #   "# II. Kết quả nghiên cứu, giải quyết và trả lời kiến nghị"
 #   "**2. Kết quả nghiên cứu, giải quyết và trả lời kiến nghị**"
+# Tolerant lỗi dấu OCR đã gặp thực tế (KÊt/KÉt/Ket, quả/qua, nghị/nghi) theo
+# convention của module nv — các mốc còn lại giữ khớp dấu chính xác.
 # ---------------------------------------------------------------------------
-_S2_RE = re.compile(r"kết quả nghiên cứu, giải quyết và trả lời kiến nghị", re.I)
+_S2_RE = re.compile(
+    r"k[ÊÉếe]t\s+qu[ảa]\s+nghiên cứu,?\s+giải quyết\s+và\s+trả\s+lời\s+kiến\s+ngh[ịi]",
+    re.I,
+)
 
 # ---------------------------------------------------------------------------
 # Bẫy loại trừ S1 (S1 = phần "Nội dung kiến nghị")
