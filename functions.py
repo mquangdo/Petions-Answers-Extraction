@@ -4,6 +4,7 @@ import sys
 import unicodedata
 from pathlib import Path
 
+from common import _clean_text, find_entities
 from config import LLM_CONCURRENCY
 from logger import get_logger
 from postprocess import postprocess_noi_dung, postprocess_tra_loi
@@ -22,81 +23,6 @@ from regexes import (
     _NGUOI_KY_RE,
     _TRACH_NHIEM_RE,
 )
-
-
-def _is_header(line: str) -> bool:
-    s = line.strip()
-    if not s:
-        return False
-    return (
-        s.startswith("#")
-        or s.startswith("**")
-        or s.startswith("Kính gửi")
-        or s.startswith("Số:")
-        or s.startswith("-")
-    )
-
-
-def find_entities(text: str):
-    """
-    Chỉ duyệt các dòng header (heading '#', letterhead '**...**', 'Kính gửi:',
-    'Số:', danh sách người nhận '- ...') để giảm số dòng phải duyệt.
-    Khi gặp header chứa Đoàn đại biểu Quốc hội (tỉnh hoặc thành phố) và header
-    chứa tên Bộ thì trả ngay {"daibieu": ..., "bộ": ...}. Không có thì trả None.
-    """
-    bo_val = None
-    db_val = None
-    for line in text.splitlines():
-        if not _is_header(line):
-            continue
-        if bo_val is None and "bộ" in line.lower():
-            v = _extract_bo(line)
-            if v:
-                bo_val = v
-        if db_val is None:
-            low = line.lower()
-            if "đoàn đại biểu quốc hội tỉnh" in low or "đoàn đại biểu quốc hội thành phố" in low:
-                v = _extract_daibieu(line)
-                if v:
-                    db_val = v
-        if bo_val and db_val:
-            return {"daibieu": db_val, "bộ": bo_val}
-    return None
-
-
-_BO_NAMES = (
-    "Bộ Nông nghiệp và Môi trường",
-    "Bộ Tài nguyên và Môi trường",
-    "Bộ Tài chính",
-    "Bộ Công Thương",
-    "Bộ Y tế",
-    "Bộ Xây dựng",
-    "Bộ Giao thông vận tải",
-    "Bộ Giáo dục và Đào tạo",
-    "Bộ Kế hoạch và Đầu tư",
-    "Bộ Văn hóa, Thể thao và Du lịch",
-    "Bộ Lao động - Thương binh và Xã hội",
-    "Bộ Khoa học và Công nghệ",
-    "Bộ Thông tin và Truyền thông",
-    "Bộ Tư pháp",
-    "Bộ Nội vụ",
-    "Bộ Quốc phòng",
-    "Bộ Công an",
-    "Bộ Ngoại giao",
-    "Ban tổ chức Trung ương",
-    "Ủy ban Dân nguyện và Giám sát",
-)
-
-
-def _extract_bo(line: str) -> str:
-    low = line.lower()
-    for name in _BO_NAMES:
-        if name.lower() in low:
-            return name
-    return "Bộ Y tế"
-
-
-_MARKERS = ("Đoàn đại biểu Quốc hội tỉnh", "Đoàn đại biểu Quốc hội thành phố")
 
 # ---------------------------------------------------------------------------
 # Tra cứu ID Đơn vị tiếp nhận (tỉnh/thành phố) từ ID_đoàn_ĐB.json
@@ -173,23 +99,6 @@ def extract_donvi_id_from_text(md_text: str) -> int | None:
     return None
 
 
-def _extract_daibieu(line: str) -> str:
-    low = line.lower()
-    for marker in _MARKERS:
-        idx = low.find(marker.lower())
-        if idx >= 0:
-            after = line[idx + len(marker):]
-            words = []
-            for w in after.split():
-                wc = w.strip(";,:.")
-                if wc and wc[0].isupper():
-                    words.append(wc)
-                else:
-                    break
-            return marker + (" " + " ".join(words) if words else "")
-    return "Đoàn đại biểu Quốc hội"
-
-
 def _is_s1(line: str) -> bool:
     low = line.lower()
     if "nội dung kiến nghị" not in low:
@@ -198,36 +107,6 @@ def _is_s1(line: str) -> bool:
         return False
     s = line.strip()
     return s.startswith("#") or s.startswith("**") or s.startswith("_")
-
-
-def _clean_text(text: str) -> str:
-    out = []
-    for line in text.splitlines():
-        s = line.strip()
-        if not s:
-            out.append("")
-            continue
-        s = re.sub(r"^(#+\s*|\*\*|\*|_+|>\s*)", "", s)
-        s = s.strip(" *_#>")
-        s = s.replace("<br>", " ").replace("<br/>", " ").replace("</br>", " ")
-        s = re.sub(r"<sup>[^<]*</sup>", "", s)
-        s = re.sub(r"\s+", " ", s).strip()
-        out.append(s)
-    result = []
-    blank = False
-    for l in out:
-        if l:
-            result.append(l)
-            blank = False
-        else:
-            if not blank:
-                result.append("")
-            blank = True
-    while result and not result[0]:
-        result.pop(0)
-    while result and not result[-1]:
-        result.pop()
-    return "\n".join(result)
 
 
 def classify_format(md_text: str):

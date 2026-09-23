@@ -3,16 +3,18 @@
 Router: định tuyến trích xuất theo cơ quan ban hành (Bộ).
 
 Luồng: detect tên Bộ từ markdown OCR -> tra bảng MINISTRY_TO_MODULE
-(định nghĩa cứng trong file này) -> load bộ regex chuyên biệt trong
-modules/<mã>/ -> trích xuất.
+(định nghĩa cứng trong file này) -> load file đơn modules/<mã>.py
+(regex + functions đã gộp) -> trích xuất.
 - KHÔNG import functions (self-contained): danh sách tên Bộ, chuẩn hóa dấu
   và vòng detect tự implement trong file này.
-- KHÔNG fallback root: Bộ lạ / không detect được -> mặc định "Bộ Y tế"
-  (module yt). Module lỗi/trả rỗng -> kết quả rỗng (không bao giờ nổ job).
+- KHÔNG fallback root: Bộ lạ / không detect được -> mặc định
+  "Bộ Nông nghiệp và Môi trường" (module nnmt). Module lỗi/trả rỗng
+  -> kết quả rỗng (không bao giờ nổ job).
 
-Preload: toàn bộ 12 module được load 1 lần lúc import (single-threaded,
-trước khi worker spawn thread) nên runtime chỉ đọc dict cache — không lock,
-không race sys.modules. Module nào load lỗi thì bỏ qua (coi như chưa load).
+Preload: common.py + toàn bộ 13 module được load 1 lần lúc import
+(single-threaded, trước khi worker spawn thread) nên runtime chỉ đọc dict
+cache — không lock, không race sys.modules. Module nào load lỗi thì bỏ qua
+(coi như chưa load); common lỗi thì raise loud (single point of failure).
 """
 
 import asyncio
@@ -75,7 +77,7 @@ _SKIP_MINISTRIES = ("Ủy ban Dân nguyện và Giám sát",)
 
 # Bảng map cứng: tên cơ quan chuẩn (có dấu) -> mã module trong modules/.
 # Bộ lạ (detect được tên nhưng chưa có module) và không detect được ->
-# mặc định "Bộ Y tế" (module yt), KHÔNG fallback root.
+# mặc định "Bộ Nông nghiệp và Môi trường" (module nnmt), KHÔNG fallback root.
 MINISTRY_TO_MODULE = {
     "Bộ Nông nghiệp và Môi trường": "nnmt",
     "Bộ Nội vụ": "nv",
@@ -92,8 +94,8 @@ MINISTRY_TO_MODULE = {
     "Tòa án nhân dân tối cao": "tandtc",
 }
 
-DEFAULT_MINISTRY = "Bộ Y tế"
-DEFAULT_MODULE = "yt"
+DEFAULT_MINISTRY = "Bộ Nông nghiệp và Môi trường"
+DEFAULT_MODULE = "nnmt"
 
 _EMPTY_METADATA = {"so_cong_van": None, "ngay_ban_hanh": None, "nguoi_ky": None}
 
@@ -149,7 +151,7 @@ def detect_ministry(md_text: str) -> str | None:
 
 
 def _lookup_module(ministry: str | None) -> str:
-    """Tra mã module theo tên Bộ; lạ/không có -> mặc định module yt."""
+    """Tra mã module theo tên Bộ; lạ/không có -> mặc định module nnmt."""
     if ministry:
         code = MINISTRY_TO_MODULE.get(ministry)
         if code is None:
@@ -162,47 +164,43 @@ def _lookup_module(ministry: str | None) -> str:
     return DEFAULT_MODULE
 
 
-def _load_module_functions(code: str):
-    """Load modules/<code>/functions.py (+ sibling regexes/postprocess).
+def _load_common_once() -> None:
+    """Load common.py (root) MỘT lần, GIỮ alias sys.modules["common"].
 
-    Swap sys.modules có restore trong finally để `from regexes import ...`
-    ăn đúng file của module đang load (không ăn nhầm module khác). Chỉ gọi
-    lúc preload single-threaded.
+    Mọi functions.py đều `from common import ...` nên alias phải tồn tại
+    trong SUỐT preload (không restore giữa chừng như regexes từng module).
+    Giữ nguyên sau preload để `import common` ở đâu cũng resolve đúng.
+    Common lỗi -> raise LOUD (single point of failure: im lặng sẽ thành 13
+    warning khó hiểu + toàn bộ file trả rỗng).
     """
-    mdir = _MODULES_DIR / code
-    swapped = {}
-
-    def _swap(alias: str, filename: str) -> None:
-        path = mdir / filename
-        if not path.is_file():
-            return
-        spec = importlib.util.spec_from_file_location(
-            f"modules_{code}_{alias}", path
-        )
-        mod = importlib.util.module_from_spec(spec)
-        swapped[alias] = sys.modules.get(alias)
-        sys.modules[alias] = mod
-        spec.loader.exec_module(mod)
-
+    path = _MODULES_DIR.parent / "common.py"
+    spec = importlib.util.spec_from_file_location("common", path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["common"] = mod
     try:
-        _swap("regexes", "regexes.py")
-        _swap("postprocess", "postprocess.py")
-        spec = importlib.util.spec_from_file_location(
-            f"modules_{code}_functions", mdir / "functions.py"
-        )
-        fnmod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(fnmod)
-        return fnmod
-    finally:
-        for alias, prev in swapped.items():
-            if prev is None:
-                sys.modules.pop(alias, None)
-            else:
-                sys.modules[alias] = prev
+        spec.loader.exec_module(mod)
+    except Exception as e:
+        sys.modules.pop("common", None)
+        raise RuntimeError(f"common.py load thất bại, dừng preload: {e}") from e
+
+
+def _load_module_functions(code: str):
+    """Load modules/<code>.py (file đơn đã gộp regexes + functions).
+
+    "common" đã swap sẵn ngoài vòng lặp nên `from common import ...` trong
+    file module luôn ăn đúng. Không còn alias "regexes" để swap/restore.
+    Chỉ gọi lúc preload single-threaded.
+    """
+    path = _MODULES_DIR / f"{code}.py"
+    spec = importlib.util.spec_from_file_location(f"modules_{code}", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def _preload_all() -> dict:
-    """Load toàn bộ module trong map lúc import (single-threaded)."""
+    """Load common + toàn bộ module trong map lúc import (single-threaded)."""
+    _load_common_once()
     loaded = {}
     seen = set()
     for code in MINISTRY_TO_MODULE.values():
@@ -241,7 +239,7 @@ async def route_extract(
     """Định tuyến trích xuất 1 văn bản theo Bộ. Trả dict:
         {"petitions": [...], "metadata": {...},
          "ministry": str, "module": str}
-    ministry không bao giờ None (mặc định Bộ Y tế); module là mã module đã
+    ministry không bao giờ None (mặc định Bộ Nông nghiệp và Môi trường); module là mã module đã
     thử (không có "root" — đã bỏ fallback root).
     llm_semaphore giữ lại cho tương thích caller (hiện không dùng: module
     sync chạy to_thread, không gọi LLM).
