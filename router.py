@@ -30,8 +30,8 @@ logger = get_logger("router", "pipeline.log")
 
 _MODULES_DIR = Path(__file__).resolve().parent / "modules"
 
-# Danh sách tên cơ quan chuẩn (copy từ functions._BO_NAMES + 2 cơ quan ngoài
-# Bộ có module riêng; đồng bộ tay khi functions.py đổi).
+# Danh sách tên cơ quan chuẩn (copy từ common._BO_NAMES + 2 cơ quan ngoài
+# Bộ có module riêng; đồng bộ tay khi common.py đổi, đã bổ sung từ CQTQ.txt).
 _BO_NAMES = (
     "Bộ Nông nghiệp và Môi trường",
     "Bộ Tài nguyên và Môi trường",
@@ -53,6 +53,24 @@ _BO_NAMES = (
     "Bộ Ngoại giao",
     "Ban tổ chức Trung ương",
     "Ủy ban Dân nguyện và Giám sát",
+    "Văn phòng Quốc hội",
+    "Ủy ban Trung ương Mặt trận Tổ quốc VN",
+    "Tổng liên đoàn Lao động VN",
+    "Ban Nội chính Trung ương",
+    "Văn phòng Chính phủ",
+    "Ngân hàng Nhà nước Việt Nam",
+    "Ủy ban Kinh tế và Tài chính",
+    "Ngân hàng Chính sách xã hội",
+    "Bộ Văn hóa Thể thao du lịch",
+    "Ủy ban Kiểm tra Trung ương",
+    "Ủy ban Công tác đại biểu",
+    "Ủy ban Khoa học Công nghệ và Môi trường",
+    "Bộ Dân tộc và Tôn giáo",
+    "Ủy ban Pháp luật và Tư pháp",
+    "Văn phòng Trung ương Đảng",
+    "Thanh tra Chính phủ",
+    "Ban Tuyên giáo Trung ương",
+    "Ủy ban Văn hóa và Xã hội",
 )
 
 # Cơ quan ngoài Bộ có module riêng, tên không nằm trong _BO_NAMES nên phải
@@ -92,6 +110,10 @@ MINISTRY_TO_MODULE = {
     "Ủy ban Trung ương MTTQ": "ubtwmttq",
     "Ủy ban Trung ương Mặt trận Tổ quốc": "ubtwmttq",
     "Tòa án nhân dân tối cao": "tandtc",
+    # Biến thể tên (không dấu phẩy / viết tắt): map về module của tên chuẩn,
+    # nếu không detect trúng biến thể sẽ rớt nhầm default nnmt.
+    "Bộ Văn hóa Thể thao du lịch": "vh",
+    "Ủy ban Trung ương Mặt trận Tổ quốc VN": "ubtwmttq",
 }
 
 DEFAULT_MINISTRY = "Bộ Nông nghiệp và Môi trường"
