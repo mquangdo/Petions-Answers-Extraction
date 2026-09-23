@@ -482,6 +482,31 @@ def _extract_signer(md_text: str) -> str:
     return ""
 
 
+def _extract_llm(md_text: str) -> list:
+    """Fallback LLM cho file classify "llm": tach petition bang llm_chunking.
+
+    - Map cap theo THU TU kien_nghi[i] <-> tra_loi[i] (cat o min length),
+      chay _clean_text + postprocess_noi_dung/tra_loi nhu duong regex.
+    - Moi exception/timeout -> return [] (giu contract cu: job khong chet).
+    - Lazy import llm_chunking de preload router nhe; max_tries=2 (toi da
+      4 call/file) theo chot pipeline.
+    """
+    try:
+        from llm_chunking import extract_from_md_sync
+        res = extract_from_md_sync(md_text, max_tries=2) or {}
+        pairs = []
+        for kn, tl in zip(res.get("kien_nghi", []), res.get("tra_loi", [])):
+            if not kn.strip() or not tl.strip():
+                continue
+            pairs.append({
+                "noi_dung": postprocess_noi_dung(_clean_text(kn)),
+                "tra_loi": postprocess_tra_loi(tl, _clean_text),
+            })
+        return pairs
+    except Exception:
+        return []
+
+
 def _is_header(line: str) -> bool:
     s = line.strip()
     if not s:

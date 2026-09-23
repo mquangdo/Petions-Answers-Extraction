@@ -50,7 +50,7 @@ import re
 import sys
 from pathlib import Path
 
-from common import postprocess_noi_dung, postprocess_tra_loi, _clean_text, _extract_signer
+from common import postprocess_noi_dung, postprocess_tra_loi, _clean_text, _extract_signer, _extract_llm
 
 
 # ---------------------------------------------------------------------------
@@ -298,7 +298,7 @@ def extract_petitions(md_text: str) -> list:
         return _extract_f1(md_text)
     if fmt == "f3":
         return _extract_f3(md_text)
-    return []
+    return _extract_llm(md_text)
 
 
 def extract_metadata(md_text: str) -> dict:

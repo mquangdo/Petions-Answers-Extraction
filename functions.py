@@ -331,14 +331,25 @@ def extract_metadata(md_text: str) -> dict:
 
 async def _extract_llm(md_text: str, llm_semaphore: asyncio.Semaphore | None = None) -> list:
     """
-    Fallback khi file không nhận diện được format chuẩn. HIỆN TẮT: luôn trả
-    1 petition rỗng (không gọi LLM — tiết kiệm GPU/thời gian, job không bao
-    giờ chết vì lỗi LLM). Giữ nguyên signature + contract list[{"noi_dung",
-    "tra_loi"}] để caller (extract_petitions) không phải sửa.
-    Muốn bật lại semantic chunking thì khôi phục body cũ (llm_chunking).
+    Trích xuất bằng LLM — fallback khi file không nhận diện được format chuẩn
+    (dùng cho pipeline hybrid). Trả về SAME contract với extract_petitions:
+    list[{"noi_dung", "tra_loi"}].
+
+    LƯU Ý: mỗi lần gọi thực hiện 2 LLM calls (semantic chunking — xem
+    llm_chunking.py). Cảnh báo (VALIDATE/CAN_BANG/MISMATCH...) được in ra
+    logger; hàm vẫn trả về list pairs thuần.
     """
-    logger.info("[llm-fallback] tắt: trả petition rỗng, không gọi LLM")
-    return [{"noi_dung": "", "tra_loi": ""}]
+    if llm_semaphore is not None:
+        async with llm_semaphore:
+            result = await extract_from_md(md_text, file_name="document")
+    else:
+        result = await extract_from_md(md_text, file_name="document")
+    for w in result.get("warnings", []):
+        logger.warning(f"      [CẢNH BÁO LLM] {w}")
+    return [
+        {"noi_dung": kn, "tra_loi": tl}
+        for kn, tl in zip(result.get("kien_nghi", []), result.get("tra_loi", []))
+    ]
 
 
 if __name__ == "__main__":
