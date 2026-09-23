@@ -134,46 +134,60 @@ def _looks_like_name(s: str) -> bool:
     return True
 
 
-def _extract_signer(md_text: str):
+def _extract_signer(md_text: str) -> str:
     """
-    Tên người ký BTCTW trong 40 dòng cuối, 2 đường:
-      1. Có dòng chức danh ("K/T TRƯỞNG BAN", "PHÓ/PHÚ/NHIỆU TRƯỞNG BAN",
-         ... — mọi biến thể đều chứa "TRƯỞNG BAN", mở đầu "#" chứ không phải
-         bullet "-" của Nơi nhận) -> tên ở dòng không-chức-danh đầu tiên sau đó.
-      2. Không có dòng chức danh (26, 27, 5HUe, file 1: chỉ còn tên trơ
-         "*## Hà Minh Hải*") -> quét ngược tìm dòng giống tên người.
-    Trả về tên hoặc None.
+    Trích xuất chức vụ và tên người ký từ 20 dòng cuối văn bản bằng model Qwen3 (localhost:8000).
+    - Có chức vụ + tên -> '<Chức vụ> <Tên>'
+    - Không có chức vụ -> '<Tên>'
+    - Không có tên / lỗi -> ''
     """
-    tail = md_text.splitlines()[-40:]
-    title_idx = None
-    for i, l in enumerate(tail):
-        s = l.strip()
-        if s.startswith("-"):
-            continue
-        if _SIGN_TITLE_RE.search(s):
-            title_idx = i
-            break
-    if title_idx is not None:
-        for line in tail[title_idx + 1:]:
-            s = line.strip().strip("#*~").strip()
-            if not s:
-                continue
-            if _SIGN_TITLE_RE.search(s):
-                continue
-            if len(s) > 60:
-                continue
-            if not _looks_like_name(s):
-                continue
-            return s
-        return None
-    for line in reversed(tail):
-        s = line.strip()
-        if not s or s.startswith("-"):
-            continue
-        s = s.strip("#*").strip()
-        if _looks_like_name(s):
-            return s
-    return None
+    if not md_text:
+        return ""
+
+    lines = md_text.splitlines()[-20:]
+    tail_text = "\n".join(lines).strip()
+    if not tail_text:
+        return ""
+
+    url = "http://localhost:8000/v1/chat/completions"
+    payload = {
+        "model": "Qwen/Qwen3-4B-Instruct-2507",
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Bạn là trợ lý trích xuất thông tin văn bản hành chính Việt Nam. "
+                    "Nhiệm vụ: Tìm người ký văn bản ở các dòng cuối.\n"
+                    "Quy tắc:\n"
+                    "1. Nếu có cả Chức vụ và Họ tên: Trả về '<Chức vụ> <Họ tên>'.\n"
+                    "2. Nếu có họ tên người ký nhưng không có chức vụ: Trả về nguyên '<Họ tên>'.\n"
+                    "3. Chỉ trả về 'NONE' khi hoàn toàn không có tên người nào ở phần ký.\n"
+                    "4. Tuyệt đối không giải thích."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Dưới đây là 20 dòng cuối của văn bản:\n```\n{tail_text}\n```\nHọ tên người ký:",
+            },
+        ],
+        "temperature": 0,
+        "max_tokens": 50,
+    }
+
+    try:
+        import httpx
+        with httpx.Client(timeout=5.0) as client:
+            res = client.post(url, json=payload)
+            if res.status_code == 200:
+                content = res.json()["choices"][0]["message"]["content"].strip()
+                content = content.strip("'\"").strip()
+                if content.upper() == "NONE" or len(content) > 60:
+                    return ""
+                return content
+    except Exception:
+        return ""
+
+    return ""
 
 
 def extract_metadata(md_text: str) -> dict:
@@ -192,9 +206,7 @@ def extract_metadata(md_text: str) -> dict:
         if day and month:
             result["ngay_ban_hanh"] = f"{int(day):02d}/{int(month):02d}/{year}"
 
-    # Người ký BTCTW là PHÓ TRƯỞNG BAN ký thay (K/T TRƯỞNG BAN) nên giữ đúng
-    # chức danh; không tìm được tên thì trả cơ quan "Ban Tổ chức Trung ương".
-    name = _extract_signer(md_text)
-    result["nguoi_ky"] = f"Phó Trưởng ban {name}" if name else "Ban Tổ chức Trung ương"
+    signer = _extract_signer(md_text)
+    result["nguoi_ky"] = signer if signer else None
 
     return result

@@ -435,6 +435,7 @@ async def create_answer_matching(
                 "file_ids": parsed_file_ids,
                 "file_paths": file_paths,
                 "cache_key": cache_key,
+                "force_reprocess": force_reprocess,
             },
             task_id=request_id,
         )

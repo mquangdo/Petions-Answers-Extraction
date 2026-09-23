@@ -320,6 +320,62 @@ def extract_petitions(md_text: str) -> list:
         return _extract_f3(md_text)
     return []
 
+def _extract_signer(md_text: str) -> str:
+    """
+    Trích xuất chức vụ và tên người ký từ 20 dòng cuối văn bản bằng model Qwen3 (localhost:8000).
+    - Có chức vụ + tên -> '<Chức vụ> <Tên>'
+    - Không có chức vụ -> '<Tên>'
+    - Không có tên / lỗi -> ''
+    """
+    if not md_text:
+        return ""
+
+    lines = md_text.splitlines()[-20:]
+    tail_text = "\n".join(lines).strip()
+    if not tail_text:
+        return ""
+
+    url = "http://localhost:8000/v1/chat/completions"
+    payload = {
+        "model": "Qwen/Qwen3-4B-Instruct-2507",
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Bạn là trợ lý trích xuất thông tin văn bản hành chính Việt Nam. "
+                    "Nhiệm vụ: Tìm người ký văn bản ở các dòng cuối.\n"
+                    "Quy tắc:\n"
+                    "1. Nếu có cả Chức vụ và Họ tên: Trả về '<Chức vụ> <Họ tên>'.\n"
+                    "2. Nếu có họ tên người ký nhưng không có chức vụ: Trả về nguyên '<Họ tên>'.\n"
+                    "3. Chỉ trả về 'NONE' khi hoàn toàn không có tên người nào ở phần ký.\n"
+                    "4. Tuyệt đối không giải thích."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Dưới đây là 20 dòng cuối của văn bản:\n```\n{tail_text}\n```\nHọ tên người ký:",
+            },
+        ],
+        "temperature": 0,
+        "max_tokens": 50,
+    }
+
+    try:
+        import httpx
+        with httpx.Client(timeout=5.0) as client:
+            res = client.post(url, json=payload)
+            if res.status_code == 200:
+                content = res.json()["choices"][0]["message"]["content"].strip()
+                content = content.strip("'\"").strip()
+                if content.upper() == "NONE" or len(content) > 60:
+                    return ""
+                return content
+    except Exception:
+        return ""
+
+    return ""
+
+
 def extract_metadata(md_text: str) -> dict:
     """Trích xuất metadata từ markdown OCR: so_cong_van, ngay_ban_hanh, nguoi_ky.
 
@@ -343,28 +399,8 @@ def extract_metadata(md_text: str) -> dict:
         if day and month:
             result["ngay_ban_hanh"] = f"{int(day):02d}/{int(month):02d}/{year}"
 
-    # 3. Người ký: chỉ tìm trong 40 dòng CUỐI (vùng chữ ký), tránh bắt nhầm
-    #    "của Bộ trưởng ..." trong thân thư.
-    tail = "\n".join(md_text.splitlines()[-40:])
-    matches = list(_NGUOI_KY_RE.finditer(tail))
-    if matches:
-        # Ưu tiên match có tên "sạch" (không phải câu thân thư); nếu tất cả
-        # đều bẩn thì vẫn trả về chức danh "Bộ trưởng".
-        chosen = None
-        for m in matches:
-            name = (m.group(1) or "").strip()
-            if (
-                name
-                and len(name) <= 60
-                and not re.search(
-                    r"\b(đã|quy định|ban hành|sửa đổi|bãi bỏ|thông tư|nghị định|quyết định)\b",
-                    name,
-                    re.I,
-                )
-            ):
-                chosen = name
-                break
-        result["nguoi_ky"] = f"Bộ trưởng {chosen}" if chosen else "Bộ trưởng"
+    signer = _extract_signer(md_text)
+    result["nguoi_ky"] = signer if signer else None
 
     return result
 

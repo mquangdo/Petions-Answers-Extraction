@@ -30,7 +30,14 @@ celery_app.conf.task_acks_late = True
 
 
 @celery_app.task(bind=True, name="process_answer_matching")
-def process_answer_matching(self, data_list, file_ids, file_paths, cache_key=None):
+def process_answer_matching(
+    self,
+    data_list,
+    file_ids,
+    file_paths,
+    cache_key=None,
+    force_reprocess: bool = False,
+):
     """
     Xử lý 1 job:
 
@@ -62,7 +69,7 @@ def process_answer_matching(self, data_list, file_ids, file_paths, cache_key=Non
     )
 
     # Double-check cache (cache_key do API tính và truyền theo message)
-    if cache_key:
+    if cache_key and not force_reprocess:
         cached = get_cached_result(cache_key)
         if cached is not None:
             set_succeeded(job_id, cached)

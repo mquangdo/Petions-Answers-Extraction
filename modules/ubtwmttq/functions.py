@@ -204,34 +204,64 @@ def extract_petitions(md_text: str) -> list:
     return []
 
 
-def _extract_signer_name(lines: list) -> str | None:
+def _extract_signer(md_text: str) -> str:
     """
-    Tên người ký UBMTTQ: dòng heading sau dòng chức danh "TM. BAN THƯỜNG
-    TRỰC ..." trong 15 dòng cuối ("## Hà Thị Nga", "*## Hà Thị Nga*").
-    Bóc markdown "#*". Trả về tên hoặc None.
+    Trích xuất chức vụ và tên người ký từ 20 dòng cuối văn bản bằng model Qwen3 (localhost:8000).
+    - Có chức vụ + tên -> '<Chức vụ> <Tên>'
+    - Không có chức vụ -> '<Tên>'
+    - Không có tên / lỗi -> ''
     """
-    tail = lines[-15:]
-    for i, l in enumerate(tail):
-        if _SIGN_TITLE_RE.search(l):
-            for nxt in tail[i + 1:]:
-                s = nxt.strip().strip("#*").strip()
-                if not s:
-                    continue
-                if len(s) > 60:
-                    continue
-                if re.search(
-                    r"\b(đã|quy định|ban hành|sửa đổi|bãi bỏ|thông tư|nghị định|quyết định)\b",
-                    s,
-                    re.I,
-                ):
-                    continue
-                return s
-            return None
-    return None
+    if not md_text:
+        return ""
+
+    lines = md_text.splitlines()[-20:]
+    tail_text = "\n".join(lines).strip()
+    if not tail_text:
+        return ""
+
+    url = "http://localhost:8000/v1/chat/completions"
+    payload = {
+        "model": "Qwen/Qwen3-4B-Instruct-2507",
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Bạn là trợ lý trích xuất thông tin văn bản hành chính Việt Nam. "
+                    "Nhiệm vụ: Tìm người ký văn bản ở các dòng cuối.\n"
+                    "Quy tắc:\n"
+                    "1. Nếu có cả Chức vụ và Họ tên: Trả về '<Chức vụ> <Họ tên>'.\n"
+                    "2. Nếu có họ tên người ký nhưng không có chức vụ: Trả về nguyên '<Họ tên>'.\n"
+                    "3. Chỉ trả về 'NONE' khi hoàn toàn không có tên người nào ở phần ký.\n"
+                    "4. Tuyệt đối không giải thích."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Dưới đây là 20 dòng cuối của văn bản:\n```\n{tail_text}\n```\nHọ tên người ký:",
+            },
+        ],
+        "temperature": 0,
+        "max_tokens": 50,
+    }
+
+    try:
+        import httpx
+        with httpx.Client(timeout=5.0) as client:
+            res = client.post(url, json=payload)
+            if res.status_code == 200:
+                content = res.json()["choices"][0]["message"]["content"].strip()
+                content = content.strip("'\"").strip()
+                if content.upper() == "NONE" or len(content) > 60:
+                    return ""
+                return content
+    except Exception:
+        return ""
+
+    return ""
 
 
 def extract_metadata(md_text: str) -> dict:
-    """Trích xuất metadata: so_cong_van, ngay_ban_hanh, nguoi_ky (tên)."""
+    """Trích xuất metadata: so_cong_van, ngay_ban_hanh, nguoi_ky."""
     result = {"so_cong_van": None, "ngay_ban_hanh": None, "nguoi_ky": None}
 
     m = _SO_CONG_VAN_RE.search(md_text)
@@ -246,8 +276,7 @@ def extract_metadata(md_text: str) -> dict:
         if day and month:
             result["ngay_ban_hanh"] = f"{int(day):02d}/{int(month):02d}/{year}"
 
-    name = _extract_signer_name(md_text.splitlines())
-    if name:
-        result["nguoi_ky"] = name
+    signer = _extract_signer(md_text)
+    result["nguoi_ky"] = signer if signer else None
 
     return result

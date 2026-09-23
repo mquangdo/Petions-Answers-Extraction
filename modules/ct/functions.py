@@ -186,45 +186,60 @@ def extract_petitions(md_text: str) -> list:
     return []
 
 
-def _extract_signer(md_text: str):
+def _extract_signer(md_text: str) -> str:
     """
-    Tên người ký Bộ Công Thương: nằm ở dòng SAU (các) dòng chức danh trong
-    40 dòng cuối, ví dụ:
-      "## KT. BỘ TRƯỞNG THỨ TRƯỞNG" -> "## Trương Thanh Hoài"
-      "## KT. BỘ TRƯỞNG" + "## THỨ TRƯỞNG" -> "*## Nguyễn Sinh Nhật Tân*"
-    Bỏ qua dòng chức danh thuần (_SIGN_TITLE_RE, chịu OCR "THỬ TRƯỞNG"),
-    bóc markdown "#*". Chỉ nhận dòng chức danh mở đầu bằng "#" hoặc "KT."
-    (khối chữ ký) — KHÔNG nhận bullet "- ..." của "Nơi nhận" (vd "- Bộ trưởng
-    Lê Mạnh Hùng (để b/c);"). Trả về tên hoặc None (file không có khối chữ ký).
+    Trích xuất chức vụ và tên người ký từ 20 dòng cuối văn bản bằng model Qwen3 (localhost:8000).
+    - Có chức vụ + tên -> '<Chức vụ> <Tên>'
+    - Không có chức vụ -> '<Tên>'
+    - Không có tên / lỗi -> ''
     """
-    tail = md_text.splitlines()[-40:]
-    title_idx = None
-    for i, l in enumerate(tail):
-        s = l.strip()
-        if s.startswith("-"):
-            continue
-        t = s.strip("#*").strip()
-        if "BỘ TRƯỞNG" in t.upper() and (s.startswith("#") or t.upper().startswith("KT.")):
-            title_idx = i
-            break
-    if title_idx is None:
-        return None
-    for line in tail[title_idx + 1:]:
-        s = line.strip().strip("#*").strip()
-        if not s:
-            continue
-        if _SIGN_TITLE_RE.match(s):
-            continue
-        if len(s) > 60:
-            continue
-        if re.search(
-            r"\b(đã|quy định|ban hành|sửa đổi|bãi bỏ|thông tư|nghị định|quyết định)\b",
-            s,
-            re.I,
-        ):
-            continue
-        return s
-    return None
+    if not md_text:
+        return ""
+
+    lines = md_text.splitlines()[-20:]
+    tail_text = "\n".join(lines).strip()
+    if not tail_text:
+        return ""
+
+    url = "http://localhost:8000/v1/chat/completions"
+    payload = {
+        "model": "Qwen/Qwen3-4B-Instruct-2507",
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Bạn là trợ lý trích xuất thông tin văn bản hành chính Việt Nam. "
+                    "Nhiệm vụ: Tìm người ký văn bản ở các dòng cuối.\n"
+                    "Quy tắc:\n"
+                    "1. Nếu có cả Chức vụ và Họ tên: Trả về '<Chức vụ> <Họ tên>'.\n"
+                    "2. Nếu có họ tên người ký nhưng không có chức vụ: Trả về nguyên '<Họ tên>'.\n"
+                    "3. Chỉ trả về 'NONE' khi hoàn toàn không có tên người nào ở phần ký.\n"
+                    "4. Tuyệt đối không giải thích."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Dưới đây là 20 dòng cuối của văn bản:\n```\n{tail_text}\n```\nHọ tên người ký:",
+            },
+        ],
+        "temperature": 0,
+        "max_tokens": 50,
+    }
+
+    try:
+        import httpx
+        with httpx.Client(timeout=5.0) as client:
+            res = client.post(url, json=payload)
+            if res.status_code == 200:
+                content = res.json()["choices"][0]["message"]["content"].strip()
+                content = content.strip("'\"").strip()
+                if content.upper() == "NONE" or len(content) > 60:
+                    return ""
+                return content
+    except Exception:
+        return ""
+
+    return ""
 
 
 def extract_metadata(md_text: str) -> dict:
@@ -244,9 +259,7 @@ def extract_metadata(md_text: str) -> dict:
         if day and month:
             result["ngay_ban_hanh"] = f"{int(day):02d}/{int(month):02d}/{year}"
 
-    name = _extract_signer(md_text)
-    # Người ký BCT là THỨ TRƯỞNG ký thay (KT. BỘ TRƯỞNG) nên giữ đúng chức
-    # danh; file không có khối chữ ký thì trả chức danh chung "Bộ trưởng".
-    result["nguoi_ky"] = f"Thứ trưởng {name}" if name else "Bộ trưởng"
+    signer = _extract_signer(md_text)
+    result["nguoi_ky"] = signer if signer else None
 
     return result

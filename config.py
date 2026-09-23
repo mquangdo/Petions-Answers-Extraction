@@ -36,7 +36,7 @@ RABBITMQ_URL = os.environ.get(
 CELERY_QUEUE = os.environ.get("CELERY_QUEUE", "answer_matching")
 
 # OCR Service
-OCR_URL = os.environ.get("OCR_URL", "http://127.0.0.1:8078/step1/ocr")
+OCR_URL = os.environ.get("OCR_URL", "http://127.0.0.1:8088/step1/ocr")
 OCR_TIMEOUT = float(os.environ.get("OCR_TIMEOUT", "600.0"))
 MAX_CONCURRENCY = int(os.environ.get("MAX_CONCURRENCY", "2"))
 OCR_MAX_RETRIES = int(os.environ.get("OCR_MAX_RETRIES", "5"))
