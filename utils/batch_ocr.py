@@ -37,14 +37,14 @@ from postprocess import _fix_ocr_diacritics, clean_footer
 #   1. POST /v1/ocr/documents -> canonical JSON (field "content" là text thuần,
 #      KHÔNG có marker markdown).
 #   2. POST /v1/ocr/render (format=markdown) -> markdown có cấu trúc (#, **).
-OCR_URL = "https://8085--main--dev--sinhnq3.coder.vts-ai.space/v1/ocr/documents"
-RENDER_URL = "https://8085--main--dev--sinhnq3.coder.vts-ai.space/v1/ocr/render"
+OCR_URL = "http://localhost:8085/v1/ocr/documents"
+RENDER_URL = "http://localhost:8085/v1/ocr/render"
 
 JITTER = 1.0
 MAX_RETRIES = 5
 RETRY_BACKOFF_BASE = 3
 RETRYABLE_CODES = {429, 500, 502, 503, 504}
-DEFAULT_CONCURRENCY = 3
+DEFAULT_CONCURRENCY = 4
 OCR_TIMEOUT = 300
 RENDER_TIMEOUT = 60      # giây; render không chạy lại OCR nên nhanh
 RENDER_MAX_RETRIES = 3   # số lần thử lại cho bước render
@@ -77,7 +77,7 @@ async def _ocr_pdf_async(
                     "enable_correction": "false",
                     "process_table": "false",
                     "use_celery": "false",
-                    "use_cache": "false",
+                    "use_cache": "true",
                 },
             )
 
