@@ -1,0 +1,28 @@
+services:
+  vllm:
+    image: vllm/vllm-openai:latest
+
+    ports:
+      - "8000:8000"
+
+    ipc: host
+
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=1
+
+    command: >
+      --model Qwen/Qwen3-4B-Instruct-2507
+      --dtype bfloat16
+      --max-model-len 50000
+      --gpu-memory-utilization 0.15
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

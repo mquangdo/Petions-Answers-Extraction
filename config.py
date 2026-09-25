@@ -35,18 +35,20 @@ RABBITMQ_URL = os.environ.get(
 )
 CELERY_QUEUE = os.environ.get("CELERY_QUEUE", "answer_matching")
 
-# OCR Service
-OCR_URL = os.environ.get("OCR_URL", "http://127.0.0.1:8088/step1/ocr")
+# OCR Service (Standalone OCR)
+OCR_URL = os.environ.get("OCR_URL", "http://localhost:8085/v1/ocr/documents")
+OCR_RENDER_URL = os.environ.get("OCR_RENDER_URL", "http://localhost:8085/v1/ocr/render")
+OCR_RENDER_TIMEOUT = float(os.environ.get("OCR_RENDER_TIMEOUT", "60.0"))
 OCR_TIMEOUT = float(os.environ.get("OCR_TIMEOUT", "600.0"))
 MAX_CONCURRENCY = int(os.environ.get("MAX_CONCURRENCY", "2"))
 OCR_MAX_RETRIES = int(os.environ.get("OCR_MAX_RETRIES", "5"))
 RETRY_BACKOFF_BASE = float(os.environ.get("RETRY_BACKOFF_BASE", "1.0"))  # giây, nhân đôi sau mỗi lần thử lại
 JITTER = float(os.environ.get("JITTER", "1.0"))                         # jitter ngẫu nhiên (giây) thêm vào delay retry
 
-# LLM Service (vLLM / Ollama)
-LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://127.0.0.1:8076/v1")
+# LLM Service (vLLM Qwen3)
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://localhost:8000/v1")
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "EMPTY")
-LLM_MODEL_NAME = os.environ.get("LLM_MODEL_NAME", "google/gemma-4-26B-A4B-it")
+LLM_MODEL_NAME = os.environ.get("LLM_MODEL_NAME", "Qwen/Qwen3-4B-Instruct-2507")
 LLM_TIMEOUT = float(os.environ.get("LLM_TIMEOUT", "300.0"))
 LLM_CONCURRENCY = int(os.environ.get("LLM_CONCURRENCY", "1"))
 
