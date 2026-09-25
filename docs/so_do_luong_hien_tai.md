@@ -1,24 +1,24 @@
 # SƠ ĐỒ VÀ ĐẶC TẢ KỸ THUẬT TOÀN DIỆN HỆ THỐNG HIỆN TẠI (ANSWER MATCHING API V2)
 
-- **Phiên bản hệ thống:** `2.2.0`
-- **Thời gian cập nhật:** 17/09/2026
-- **Nhánh Git triển khai:** `fix/async-ocr-pipeline`
+- **Phiên bản hệ thống:** `2.3.0`
+- **Thời gian cập nhật:** 25/09/2026
+- **Nhánh Git triển khai:** `backup` (Kế thừa từ `fix/async-ocr-pipeline`)
 - **Các file mã nguồn cốt lõi:**
-  - API Layer: `extract_api_server.py`, `schemas.py`
-  - Task & Queue: `tasks.py`, `worker.sh`
+  - API Layer: `extract_api_server.py`, `schemas.py`, `config.py`
+  - Task & Queue: `tasks.py`, `worker.sh`, `env.sh`
   - Database & Cache: `db.py`
-  - AI Pipeline: `pipeline.py`, `functions.py`, `regexes.py`, `llm_chunking.py`, `postprocess.py`
+  - AI Pipeline: `pipeline.py`, `router.py`, `modules/`, `functions.py`, `regexes.py`, `llm_chunking.py`, `postprocess.py`
 
 ---
 
 ## 1. TỔNG QUAN KIẾN TRÚC TOÀN CẢNH (ARCHITECTURE OVERVIEW)
 
-Hệ thống Answer Matching v2 vận hành theo mô hình **Bất đồng bộ hướng sự kiện (Event-Driven Asynchronous Architecture)** kết hợp cơ chế **Cache hai lớp (Double-check Cache)** và **Hàng đợi tác vụ phân tán (Distributed Task Queue)**:
+Hệ thống Answer Matching v2 vận hành theo mô hình **Bất đồng bộ hướng sự kiện (Event-Driven Asynchronous Architecture)** kết hợp cơ chế **Cache hai lớp (Double-check Cache)**, **Định tuyến trích xuất theo Bộ (Ministry Router)**, và **Hàng đợi tác vụ phân tán (Distributed Task Queue)**:
 
 ```mermaid
 flowchart TB
     subgraph CLIENT_LAYER["1. PHÍA KHÁCH HÀNG (HTTT)"]
-        Client["Hệ Thống Thông Tin Client<br/>• Gửi request multipart<br/>• Polling định kỳ 2-3s"]
+        Client["Hệ Thống Thông Tin Client<br/>• Gửi request multipart (data_list, files)<br/>• Polling định kỳ 2-3s"]
     end
 
     subgraph API_LAYER["2. TẦNG TIẾP NHẬN & ĐIỀU PHỐI (FastAPI 8005)"]
@@ -28,18 +28,29 @@ flowchart TB
 
     subgraph BROKER_DB["3. TẦNG DỮ LIỆU & TRUYỀN THÔNG ĐIỆP"]
         DB[("PostgreSQL Database (5432)<br/>• Bảng jobs (Quản lý vòng đời request)<br/>• Bảng result_cache (Cache kết quả theo Hash)")]
-        RabbitMQ[("RabbitMQ Message Broker (5672)<br/>• Queue: answer_matching durable<br/>• Exchange: default")]
+        RabbitMQ[("RabbitMQ Broker (10.0.11.184:5673)<br/>• Vhost: /shared<br/>• Queue: answer_matching (durable)")]
     end
 
-    subgraph WORKER_LAYER["4. TẦNG THỰC THI TÁC VỤ (Celery Worker)"]
-        Worker["Celery Worker (tasks.py)<br/>• Pool: threads, concurrency 4<br/>• prefetch_multiplier = 1<br/>• task_acks_late = True<br/>• Double-check Cache Guard"]
-        SyncWrapper["run_pipeline (Sync Wrapper)<br/>ThreadPoolExecutor fallback"]
-        AsyncPipe["run_pipeline_async (pipeline.py)<br/>• File Reader tuần tự an toàn<br/>• Concurrency Semaphore = 3<br/>• Jaccard Semantic Matcher"]
+    subgraph WORKER_LAYER["4. TẦNG THỰC THI TÁC VỤ (Celery Multi-threading Worker)"]
+        WorkerMain["Celery Consumer Main Thread<br/>• Duy trì kết nối TCP & AMQP Heartbeat 30s<br/>• worker_prefetch_multiplier = 1<br/>• task_acks_late = True"]
+        InternalQ["Internal Work Queue (In-memory FIFO)"]
+        ThreadPool["Worker ThreadPool (concurrency = 4)<br/>• Thread 1 • Thread 2 • Thread 3 • Thread 4<br/>• Work-stealing: Thread rảnh bốc job ngay"]
+        AsyncPipe["run_pipeline_async (pipeline.py)<br/>• File Reader tuần tự an toàn<br/>• Semaphore OCR = 4<br/>• Semaphore LLM = 1<br/>• Jaccard Semantic Matcher"]
     end
 
     subgraph AI_SERVICES["5. DỊCH VỤ TRÍ TUỆ NHÂN TẠO & OCR"]
-        OCR["Surya OCR Service (8078)<br/>Endpoint: POST /step1/ocr<br/>• use_celery = false<br/>• Fail-Fast NonRetryableOCRError 4xx<br/>• Exponential Backoff + Jitter 5xx"]
-        vLLM["vLLM Model Serving (8076)<br/>Endpoint: POST /v1/chat/completions<br/>• Model: google/gemma-4-26B-A4B-it<br/>• Temperature 0.0, Max Tokens 32768<br/>• Fallback 2-Pass Semantic Chunking"]
+        subgraph OCR_SYS["Standalone OCR Service (Port 8085)"]
+            OCR_DOC["1. POST /v1/ocr/documents<br/>• use_celery = true, use_cache = true<br/>• Trả về Canonical Tree JSON v1.0.0"]
+            OCR_RENDER["2. POST /v1/ocr/render<br/>• Dựng cấu trúc Markdown (#, **)<br/>• Fallback text thuần nếu render lỗi"]
+        end
+        subgraph LLM_SYS["LLM Gateway / vLLM (Port 4000)"]
+            vLLM["Model Serving (127.0.0.1:4000/v1)<br/>• Model: google/gemma-4-26B-A4B-it<br/>• Max Tokens: 32768 | Temp: 0.0<br/>• Fallback 2-Pass Semantic Chunking"]
+        end
+    end
+
+    subgraph ROUTER_LAYER["6. BỘ ĐỊNH TUYẾN THEO BỘ (Ministry Router)"]
+        Router["router.py (Ministry Router)<br/>• Nhận diện tên Bộ/Ngành tự động<br/>• Tra bảng và nạp module chuyên biệt<br/>• Trích xuất ID Đoàn ĐBQH (donvi_id)"]
+        Modules["modules/<mã_bộ>.py<br/>• Regex & mẫu đặc thù từng Bộ<br/>• Fallback root extractor nếu chưa có module"]
     end
 
     Client -->|"1. POST /api/v1/answer-matching<br/>data_list, file_ids, files, force_reprocess"| API
@@ -52,34 +63,38 @@ flowchart TB
     Client -.->|"4. Polling GET /answer-matching/:id"| API
     API -.->|"Truy vấn trạng thái & kết quả"| DB
 
-    RabbitMQ -->|"Consume message (task payload)"| Worker
-    Worker -->|"Double-check cache"| DB
-    Worker --> SyncWrapper
-    SyncWrapper --> AsyncPipe
+    RabbitMQ -->|"Kéo task về qua AMQP"| WorkerMain
+    WorkerMain -->|"Đẩy task vào bộ đệm RAM"| InternalQ
+    InternalQ -->|"Bốc task theo slot rảnh"| ThreadPool
+    ThreadPool --> AsyncPipe
     AsyncPipe -->|"Đọc file PDF bytes"| Vol
-    AsyncPipe -->|"OCR song song (Semaphore 3)"| OCR
-    AsyncPipe -.->|"Fallback trích xuất khi văn bản dị biệt"| vLLM
-    Worker -->|"Ghi cache kết quả (put_cached_result)"| DB
-    Worker -->|"Cập nhật Job hoàn tất (set_succeeded/set_failed)"| DB
+    AsyncPipe -->|"Giai đoạn 1: Lấy Canonical JSON (Timeout 600s)"| OCR_DOC
+    OCR_DOC -->|"Giai đoạn 2: Render Markdown (Timeout 60s)"| OCR_RENDER
+    OCR_RENDER --> Router
+    Router --> Modules
+    Modules -.->|"Fallback trích xuất khi văn bản dị biệt"| vLLM
+    ThreadPool -->|"Ghi cache kết quả (put_cached_result)"| DB
+    ThreadPool -->|"Cập nhật Job hoàn tất (set_succeeded/set_failed)"| DB
 ```
 
 ### Bảng chi tiết cấu hình và cổng giao tiếp kỹ thuật:
 
 | Thành phần | File mã nguồn | Port / Giao thức | Cấu hình & Trách nhiệm kỹ thuật cốt lõi |
 | :--- | :--- | :--- | :--- |
-| **FastAPI Server** | `extract_api_server.py` | `8005` (HTTP) | • Tiền xử lý: BOM removal, Smart quotes sanitization, Markdown strip.<br/>• Validate kích thước file (`MAX_FILE_SIZE_MB = 50MB`), đuôi `.pdf`.<br/>• Sinh `cache_key = SHA256(file_ids + file_bytes_hashes + data_list)`.<br/>• Quản lý file trên volume dùng chung `./uploaded_files/{request_id}/`. |
+| **FastAPI Server** | `extract_api_server.py` | `8005` (HTTP) | • Tiền xử lý: BOM removal, Smart quotes sanitization, Markdown strip.<br/>• Validate kích thước file (`MAX_FILE_SIZE_MB = 50MB`), đuôi `.pdf`.<br/>• Sinh `cache_key = SHA256(file_ids + file_bytes_hashes + data_list)`.<br/>• Quản lý lưu trữ file trên volume dùng chung `./uploaded_files/{request_id}/`. |
 | **PostgreSQL** | `db.py` | `5432` (TCP) | • `jobs`: Quản lý trạng thái xử lý (`processing`, `succeeded`, `failed`).<br/>• `result_cache`: Lưu trữ kết quả JSON theo `cache_key`.<br/>• Connection pool: SQLAlchemy `create_engine` với `SessionLocal`. |
-| **RabbitMQ** | `docker-compose.yml` | `5672` (AMQP) | • Queue bền vững (`durable`): `answer_matching`.<br/>• Điều phối tác vụ từ API sang Worker, chống nghẽn bộ nhớ. |
-| **Celery Worker** | `tasks.py`, `worker.sh` | Chạy tiến trình nền | • Lệnh khởi chạy: `celery -A tasks worker -Q answer_matching --pool=threads -c 4 --loglevel=info --detach`.<br/>• `worker_prefetch_multiplier = 1`: Tránh kéo dồn task nặng.<br/>• `task_acks_late = True`: Task chỉ được ACK khi xử lý xong hoàn toàn.<br/>• Double-check cache trước khi gọi pipeline. |
-| **AI Pipeline** | `pipeline.py`, `functions.py` | In-process Python | • Điều phối bất đồng bộ `run_pipeline_async`.<br/>• `asyncio.Semaphore(3)`: Giới hạn tối đa 3 file OCR đồng thời.<br/>• Bộ định tuyến phân loại văn bản `classify_format`: F1, F2, F3 (Regex) hoặc Fallback LLM. |
-| **Surya OCR Server** | Dịch vụ ngoài | `8078` (HTTP) | • URL: `http://127.0.0.1:8078/step1/ocr`.<br/>• Header: `use_celery="false"` (chạy in-process trực tiếp trên server OCR).<br/>• Cơ chế Fail-Fast lỗi 4xx (`NonRetryableOCRError`), Retry 5 lần lỗi 5xx. |
-| **vLLM Engine** | Dịch vụ ngoài | `8076` (HTTP) | • URL: `http://127.0.0.1:8076/v1` (tương thích OpenAI API).<br/>• Model: `google/gemma-4-26B-A4B-it`, `max_tokens=32768`.<br/>• 2-Pass Semantic Chunking phân đoạn kiến nghị và câu trả lời. |
+| **RabbitMQ** | Cấu hình trong `env.sh` | `10.0.11.184:5673` (AMQP)<br/>Vhost: `/shared` | • Queue bền vững (`durable`): `answer_matching`.<br/>• Điều phối tác vụ từ API sang Worker, chống nghẽn bộ nhớ. |
+| **Celery Worker** | `tasks.py`, `worker.sh` | Chạy tiến trình nền | • Lệnh: `celery -A tasks worker -Q answer_matching --pool=threads -c 4 --loglevel=info --logfile=worker.log --pidfile=worker.pid --detach`.<br/>• `worker_prefetch_multiplier = 1`: Tránh kéo dồn task nặng.<br/>• `task_acks_late = True`: Task chỉ được ACK khi hoàn tất.<br/>• Tách biệt luồng Consumer (giữ Heartbeat) và 4 luồng thực thi. |
+| **AI Pipeline** | `pipeline.py`, `functions.py` | In-process Python | • Điều phối bất đồng bộ `run_pipeline_async`.<br/>• `asyncio.Semaphore(4)`: Cho phép OCR đồng thời tối đa 4 file PDF.<br/>• `asyncio.Semaphore(1)`: Giới hạn tối đa 1 lượt suy luận LLM để bảo vệ GPU. |
+| **Ministry Router** | `router.py`, `modules/` | In-process Python | • Tự động nhận diện tên Bộ trong văn bản.<br/>• Nạp preload 13+ module chuyên biệt theo Bộ.<br/>• Trích xuất ID Đoàn ĐBQH (`donvi_id`) phục vụ đối soát địa phương. |
+| **Standalone OCR** | Container độc lập | `8085` (HTTP) | • URL Documents: `http://localhost:8085/v1/ocr/documents` (`timeout=600s`).<br/>• URL Render: `http://localhost:8085/v1/ocr/render` (`timeout=60s`).<br/>• Canonical Tree JSON v1.0.0, tự động inpaint xóa dấu đỏ và bóc tách chữ ký. |
+| **LLM Gateway** | LiteLLM / vLLM Gateway | `127.0.0.1:4000` (HTTP) | • URL: `http://127.0.0.1:4000/v1` (OpenAI compatible).<br/>• Model: `google/gemma-4-26B-A4B-it`, `max_tokens=32768`.<br/>• 2-Pass Semantic Chunking phân đoạn kiến nghị và câu trả lời. |
 
 ---
 
 ## 2. SƠ ĐỒ TUẦN TỰ HOẠT ĐỘNG (SEQUENCE DIAGRAMS)
 
-### 2.1. Luồng chuẩn thành công (Bao gồm Cache Hit & Polling Asynchronous)
+### 2.1. Luồng chuẩn thành công (Bao gồm Cache Hit, Asynchronous OCR & Ministry Route)
 
 ```mermaid
 sequenceDiagram
@@ -88,11 +103,12 @@ sequenceDiagram
     participant API as FastAPI (8005)
     participant Disk as Shared Disk
     participant DB as PostgreSQL (5432)
-    participant MQ as RabbitMQ (5672)
-    participant Worker as Celery Worker
+    participant MQ as RabbitMQ (5673)
+    participant Worker as Celery Worker (Pool Threads -c 4)
     participant Pipe as Pipeline Engine
-    participant OCR as Surya OCR (8078)
-    participant vLLM as vLLM (8076)
+    participant OCR as Standalone OCR (8085)
+    participant Router as Ministry Router
+    participant LLM as LLM Gateway (4000)
 
     Client->>API: POST /api/v1/answer-matching (data_list, file_ids, files, force_reprocess)
     API->>API: 1. Clean JSON, Validate Schema
@@ -116,30 +132,35 @@ sequenceDiagram
                 DB-->>API: status: processing
                 API-->>Client: HTTP 200 (status: PROCESSING)
             end
-        and Celery Worker xử lý ngầm
-            MQ->>Worker: Consume message (data_list, file_ids, file_paths, cache_key)
-            Worker->>Worker: Validate InternalJobPayload schema
+        and Celery Worker xử lý ngầm (Đa luồng)
+            MQ->>Worker: Consume message qua luồng chính
+            Worker->>Worker: Giao task cho 1 Worker Thread đang rảnh
             Worker->>DB: get_cached_result(cache_key) (Double-check race condition)
             
             Worker->>Pipe: run_pipeline -> run_pipeline_async
-            Pipe->>Disk: Đọc tuần tự bytes của toàn bộ file PDF
+            Pipe->>Disk: Đọc tuần tự bytes toàn bộ file PDF
             
-            par OCR & Extract đồng thời (Semaphore = 3)
-                Pipe->>OCR: POST /step1/ocr (file_bytes, use_celery=false)
-                OCR-->>Pipe: Trả về text Markdown
-                Pipe->>Pipe: _fix_ocr_diacritics & clean_footer
-                Pipe->>Pipe: extract_metadata (Số CV, Ngày, Người ký)
-                Pipe->>Pipe: classify_format -> f1/f2/f3 hoặc llm
+            par OCR & Extract đồng thời (OCR Semaphore = 4)
+                Pipe->>OCR: 1. POST /v1/ocr/documents (bytes, use_celery=true, use_cache=true)
+                OCR-->>Pipe: Trả về Canonical Tree JSON v1.0.0
+                Pipe->>OCR: 2. POST /v1/ocr/render (canonical JSON, format=markdown)
+                OCR-->>Pipe: Trả về Markdown có cấu trúc (#, **)
+                Note over Pipe: Nếu render lỗi -> fallback sang canonical['content']
                 
-                alt Format chuẩn f1/f2/f3
-                    Pipe->>Pipe: Trích xuất cặp noi_dung, tra_loi bằng Regex
-                else Format bất quy tắc llm
-                    Pipe->>vLLM: Lần 1: Chat Completion trích xuất mảng ID Kiến nghị
-                    vLLM-->>Pipe: JSON array of unit IDs
-                    Pipe->>vLLM: Lần 2: Chat Completion trích xuất mảng ID Câu trả lời
-                    vLLM-->>Pipe: JSON array of unit IDs
-                    Pipe->>Pipe: validate_and_resolve & cân bằng số lượng KN == TL
+                Pipe->>Pipe: _fix_ocr_diacritics & clean_footer
+                Pipe->>Router: route_extract(md_text, llm_semaphore)
+                Router->>Router: Nhận diện tên Bộ & extract_donvi_id (Đoàn ĐBQH)
+                
+                alt Bộ có module chuyên biệt trong modules/
+                    Router->>Router: Gọi hàm extract của module Bộ tương ứng
+                else Bộ chưa có module hoặc format bất quy tắc
+                    Router->>LLM: Lần 1: Chat Completion trích xuất mảng ID Kiến nghị
+                    LLM-->>Router: JSON array of unit IDs
+                    Router->>LLM: Lần 2: Chat Completion trích xuất mảng ID Câu trả lời
+                    LLM-->>Router: JSON array of unit IDs
+                    Router->>Router: validate_and_resolve & cân bằng KN == TL
                 end
+                Router-->>Pipe: Trả về petitions, metadata, donvi_id
             end
             
             Pipe->>Pipe: Gom toàn bộ pairs (noi_dung, tra_loi, file_id, metadata)
@@ -149,6 +170,7 @@ sequenceDiagram
             
             Worker->>DB: put_cached_result(cache_key, data_list, result)
             Worker->>DB: set_succeeded(request_id, result)
+            Worker->>MQ: Gửi basic_ack xác nhận hoàn tất task
         end
 
         Client->>API: GET /api/v1/answer-matching/:id?plain_text=true
@@ -161,9 +183,7 @@ sequenceDiagram
 
 ---
 
-### 2.2. Sơ đồ xử lý ngoại lệ và cơ chế Fail-Fast (Failure & Error Recovery)
-
-Hệ thống thiết lập các rào chắn kỹ thuật nhằm phát hiện và cô lập lỗi ngay lập tức, ngăn ngừa hiện tượng treo queue hay lãng phí tài nguyên tính toán:
+### 2.2. Sơ đồ xử lý ngoại lệ và cơ chế bảo vệ (Failure & Resilience Recovery)
 
 ```mermaid
 sequenceDiagram
@@ -171,10 +191,10 @@ sequenceDiagram
     actor Client as Client (HTTT)
     participant API as FastAPI (8005)
     participant DB as PostgreSQL (5432)
-    participant MQ as RabbitMQ (5672)
+    participant MQ as RabbitMQ (5673)
     participant Worker as Celery Worker
     participant Pipe as Pipeline Engine
-    participant OCR as Surya OCR (8078)
+    participant OCR as Standalone OCR (8085)
 
     Note over Client,API: TÌNH HUỐNG 1: Lỗi dữ liệu đầu vào (Validation Error)
     Client->>API: POST /api/v1/answer-matching (File > 50MB hoặc không phải PDF)
@@ -189,24 +209,30 @@ sequenceDiagram
     API->>DB: set_failed(request_id, error=Không kết nối được RabbitMQ)
     API-->>Client: Trả ngay HTTP 503 Service Unavailable (Kèm thông báo lỗi chi tiết)
 
-    Note over Worker,OCR: TÌNH HUỐNG 3: Lỗi nghiệp vụ OCR (Fail-Fast 4xx)
+    Note over Worker,OCR: TÌNH HUỐNG 3: Lỗi nghiệp vụ OCR (Fail-Fast 4xx vs Retryable 5xx)
     Worker->>Pipe: run_pipeline_async
-    Pipe->>OCR: POST /step1/ocr (file chứa bảng phức tạp không hỗ trợ)
-    OCR-->>Pipe: HTTP 400 Bad Request (TABLE_CONTENT_UNSUPPORTED)
-    Note over Pipe: Nhận mã 4xx -> Ném NonRetryableOCRError ngay lập tức<br/>KHÔNG retry, không chờ backoff 25 phút!
+    Pipe->>OCR: POST /v1/ocr/documents (File hỏng mã hóa)
+    OCR-->>Pipe: HTTP 400 Bad Request
+    Note over Pipe: Nhận mã 4xx -> Ném NonRetryableOCRError ngay lập tức<br/>KHÔNG retry, giải phóng worker ngay!
     Pipe-->>Worker: Raise NonRetryableOCRError
-    Worker->>DB: set_failed(request_id, error=HTTP 400: TABLE_CONTENT_UNSUPPORTED)
+    Worker->>DB: set_failed(request_id, error=HTTP 400: Non-retryable error)
 
-    Note over Client,API: TÌNH HUỐNG 4: Phản hồi lỗi qua Polling
+    Note over Worker,OCR: TÌNH HUỐNG 4: OCR Quá tải / Timeout tạm thời (504, 502, 500)
+    Pipe->>OCR: POST /v1/ocr/documents (Server OCR bận tính toán)
+    OCR-->>Pipe: HTTP 504 Gateway Timeout
+    Note over Pipe: Nhận mã trong RETRYABLE_CODES -> Thử lại tối đa 5 lần<br/>Delay: base * 2^(attempt-1) + jitter
+    Pipe->>OCR: Thử lại lần 2 sau delay...
+
+    Note over Client,API: TÌNH HUỐNG 5: Phản hồi lỗi qua Polling
     Client->>API: GET /api/v1/answer-matching/:id
     API->>DB: get_job(request_id)
-    DB-->>API: status: failed, error: TABLE_CONTENT_UNSUPPORTED
+    DB-->>API: status: failed, error: Chi tiết nguyên nhân
     API-->>Client: HTTP 200 (status: FAILED, kèm error chi tiết)
 ```
 
 ---
 
-## 3. SƠ ĐỒ & ĐẶC TẢ CHI TIẾT AI PIPELINE (`pipeline.py`, `functions.py`, `llm_chunking.py`)
+## 3. SƠ ĐỒ & ĐẶC TẢ CHI TIẾT AI PIPELINE (`pipeline.py`, `router.py`, `modules/`)
 
 ### 3.1. Sơ đồ luồng xử lý nội bộ Pipeline
 
@@ -214,32 +240,43 @@ sequenceDiagram
 flowchart TD
     Start(["Bắt đầu run_pipeline_async"]) --> ReadDisk["Đọc tuần tự bytes PDF từ Volume dùng chung"]
     ReadDisk --> CheckDisk{"Đọc file thành công?"}
-    CheckDisk -->|Có file đọc lỗi| RaiseDiskErr["Ném RuntimeError: 1 file lỗi -> Hủy toàn bộ Job"]
+    CheckDisk -->|Có file lỗi| RaiseDiskErr["Ném RuntimeError: 1 file lỗi -> Hủy toàn bộ Job"]
     
-    CheckDisk -->|Tất cả thành công| InitSemaphore["Khởi tạo asyncio.Semaphore: MAX_CONCURRENCY = 3"]
-    InitSemaphore --> PrepareTasks["Tạo mảng Task _ocr_extract_one cho từng file"]
+    CheckDisk -->|Tất cả thành công| InitSem["Khởi tạo Semaphores:<br/>• OCR Semaphore = 4<br/>• LLM Semaphore = 1"]
+    InitSem --> PrepareTasks["Tạo mảng Task _ocr_extract_one cho từng file"]
 
     subgraph SUB_FILE["Quy trình xử lý từng file (_ocr_extract_one)"]
-        AcquireSem["Lấy Semaphore Slot"] --> CallOCR["Gọi HTTP POST /step1/ocr<br/>timeout = 300s"]
+        AcquireSem["Lấy OCR Semaphore Slot (Max 4)"] --> CallOCRDoc["Gọi HTTP POST /v1/ocr/documents<br/>timeout = 600s"]
         
-        CallOCR --> CheckHTTP{"HTTP Status Code?"}
-        CheckHTTP -->|200 OK| PostOCR["Dọn dẹp text OCR:<br/>• _fix_ocr_diacritics<br/>• clean_footer"]
+        CallOCRDoc --> CheckHTTP{"HTTP Status Code?"}
+        CheckHTTP -->|200 OK| CallRender["Gọi HTTP POST /v1/ocr/render<br/>timeout = 60s"]
         CheckHTTP -->|4xx Lỗi nghiệp vụ| FailFast["Ném NonRetryableOCRError<br/>Dừng ngay, không retry"]
-        CheckHTTP -->|429 / 5xx / Network Timeout| CheckRetry{"Số lần thử <= 5?"}
+        CheckHTTP -->|429 / 5xx / ReadTimeout| CheckRetry{"Số lần thử <= 5?"}
         CheckRetry -->|Còn lượt| CalcBackoff["Chờ: base * 2^attempt + jitter"]
-        CalcBackoff --> CallOCR
+        CalcBackoff --> CallOCRDoc
         CheckRetry -->|Hết lượt| RaiseOCRErr["Ném RuntimeError: Quá số lần thử lại"]
 
-        PostOCR --> ExtractMeta["extract_metadata:<br/>• Số công văn regex<br/>• Ngày ban hành regex<br/>• Người ký trong 40 dòng cuối"]
-        PostOCR --> Classify["classify_format: Phân loại văn bản"]
-
-        Classify -->|f1 / f2 / f3| RegexExtract["Trích xuất Regex theo format chuẩn"]
-        Classify -->|llm| LLMExtract["Fallback: llm_chunking.extract_from_md<br/>qua asyncio.to_thread"]
+        CallRender --> RenderCheck{"Render thành công?"}
+        RenderCheck -->|Thành công| UseRender["Sử dụng Markdown có cấu trúc (#, **)"]
+        RenderCheck -->|Thất bại| FallbackText["Fallback dùng canonical['content'] thuần"]
         
-        subgraph SUB_LLM["Chi tiết luồng LLM Fallback (vLLM 8076)"]
+        UseRender --> Clean["Làm sạch văn bản:<br/>• _fix_ocr_diacritics: Sửa lỗi dấu tiếng Việt<br/>• clean_footer: Loại bỏ footer, số trang lặp lại"]
+        FallbackText --> Clean
+
+        Clean --> DonVi["extract_donvi_id_from_text:<br/>Trích xuất ID Đoàn ĐBQH từ văn bản"]
+        Clean --> MinistryRouter{"ENABLE_MINISTRY_ROUTER?"}
+
+        MinistryRouter -->|True| RouteMinistry["router.route_extract:<br/>1. Quét tên Bộ từ danh sách 25+ cơ quan<br/>2. Tra bảng nạp module chuyên biệt"]
+        MinistryRouter -->|False| RootExtract["Chạy bộ trích xuất Root mặc định"]
+
+        RouteMinistry --> CheckMod{"Tìm thấy module Bộ?"}
+        CheckMod -->|Có module| RunMod["Thực thi regex theo quy chuẩn riêng của Bộ"]
+        CheckMod -->|Không có / Format dị biệt| FallbackLLM["Fallback: llm_chunking.extract_from_md<br/>(Kiểm soát bởi LLM Semaphore = 1)"]
+
+        subgraph SUB_LLM["Chi tiết luồng LLM Fallback (vLLM / LiteLLM Port 4000)"]
             Segment["Tách Atomic Units: segment_units_simple"] --> CallLLM1["Prompt 1: Phân đoạn Kiến nghị -> Array ID"]
             CallLLM1 --> CallLLM2["Prompt 2: Phân đoạn Trả lời -> Array ID"]
-            CallLLM2 --> ValidateLLM["validate_and_resolve: Kiểm tra ID, tính toàn vẹn, seen chéo"]
+            CallLLM2 --> ValidateLLM["validate_and_resolve: Kiểm tra ID, tính toàn vẹn"]
             ValidateLLM --> BalanceCheck{"Số KN bằng Số TL?"}
             BalanceCheck -->|Bằng nhau| BuildPairs["Tạo cặp nội dung và câu trả lời"]
             BalanceCheck -->|Lệch| RetryHint{"Còn lượt thử <= 3?"}
@@ -249,8 +286,9 @@ flowchart TD
             MergeExtra --> BuildPairs
         end
         
-        RegexExtract --> ReturnFileResult["Trả về petitions và metadata"]
+        RunMod --> ReturnFileResult["Trả về petitions, metadata, donvi_id, ministry"]
         BuildPairs --> ReturnFileResult
+        RootExtract --> ReturnFileResult
     end
 
     PrepareTasks --> SUB_FILE
@@ -277,24 +315,20 @@ flowchart TD
 
 ---
 
-### 3.2. Cơ chế phân loại định dạng văn bản (`classify_format`)
+### 3.2. Cơ chế định tuyến theo Bộ (`router.py`) & Mô-đun hóa
 
-Hàm `classify_format(md_text)` quét cấu trúc Markdown đã qua OCR và phân loại theo 4 nhánh:
+Hệ thống bổ sung kiến trúc **Ministry Router** độc lập (`ENABLE_MINISTRY_ROUTER = True`), giúp tăng độ chính xác trích xuất regex theo đặc thù văn bản của từng cơ quan Nhà nước:
 
-1. **Format `f1` (Đơn kiến nghị đơn mục):**
-   - Tài liệu chỉ chứa **1 mục S1** ("Nội dung kiến nghị") và **1 mục S2** ("Kết quả nghiên cứu, giải quyết và trả lời").
-   - Trong vùng giữa S1 và S2 có ít hơn 2 mục con đánh số.
-   - *Quy tắc bóc tách:* Lấy toàn bộ đoạn giữa S1 và S2 làm `noi_dung`; toàn bộ đoạn sau S2 đến phần kết thư làm `tra_loi`.
-2. **Format `f2` (Đa kiến nghị theo từng mục độc lập):**
-   - Tài liệu chứa nhiều cặp S1 và S2 được phân cách bởi các Group Header (`I. Kiến nghị số...`, `1. Đối với kiến nghị...`).
-   - *Quy tắc bóc tách:* Duyệt qua từng S2, tìm S1 gần nhất phía trước nó và xác định biên kết thúc bằng `GROUP_RE`, `END_RE`, `CLOSING_RE` hoặc `TRACH_NHIEM_RE`.
-3. **Format `f3` (Kiến nghị gom nhóm đầu thư, trả lời phân đoạn ở sau):**
-   - Có 1 mục S1 và 1 mục S2, nhưng bên trong vùng S1 liệt kê từ 2 kiến nghị trở lên (`1. Cử tri kiến nghị...`, `2. Cử tri phản ánh...`).
-   - Vùng sau S2 chia thành các tiêu đề đánh số tương ứng (`2.1. Về nội dung...`, `2.2. Đối với kiến nghị...`).
-   - *Quy tắc bóc tách:* Tách danh sách item trong S1 (`_split_items`) và map 1-1 với các block trả lời trong S2 (`_split_answer_blocks`).
-4. **Format `llm` (Văn bản dị biệt không theo quy chuẩn S1/S2):**
-   - Áp dụng khi không tìm thấy tiêu đề S1 hoặc S2 hợp lệ.
-   - Hệ thống chuyển sang cơ chế Fallback LLM Semantic Chunking trên vLLM (`llm_chunking.py`).
+1. **Preload Module an toàn:**
+   - Quét và nạp trước toàn bộ các module trong thư mục `modules/` lúc khởi động server (tránh hiện tượng race condition khi các worker thread import đồng thời).
+2. **Nhận diện cơ quan ban hành (`detect_ministry`):**
+   - Quét phần đầu văn bản Markdown tìm tên cơ quan thuộc danh sách chuẩn hơn 25 Bộ, Ban, Ngành (Bộ Tài nguyên & Môi trường, Bộ Nội vụ, Bộ Công an, Bộ Quốc phòng, Bộ GTVT, Bộ GD&ĐT...).
+3. **Tra cứu và điều phối (`MINISTRY_TO_MODULE`):**
+   - Ánh xạ tên Bộ sang module tương ứng (`btnmt.py`, `bnv.py`, `bca.py`, `bgtvt.py`, v.v.).
+   - Nếu phát hiện cấu trúc đặc thù theo từng Bộ, module sẽ áp dụng bộ regex tối ưu riêng.
+   - Nếu văn bản có cấu trúc không theo quy chuẩn, tự động chuyển sang cơ chế **LLM Fallback**.
+4. **Trích xuất định danh địa phương (`extract_donvi_id_from_text`):**
+   - Tự động nhận dạng tên tỉnh/thành phố của Đoàn Đại biểu Quốc hội trong văn bản và ánh xạ ra mã định danh `donvi_id`, hỗ trợ công tác quản lý và thống kê theo địa bàn.
 
 ---
 
@@ -323,89 +357,68 @@ Sau khi trích xuất toàn bộ các cặp câu trả lời từ các file PDF,
 
 ## 4. CHI TIẾT IMPLEMENT KỸ THUẬT & CẤU TRÚC DỮ LIỆU
 
-### 4.1. Cấu trúc bảng Cơ sở dữ liệu PostgreSQL (`db.py`)
+### 4.1. Cấu hình Tham số Môi trường Hiện tại (`config.py`, `env.sh`)
 
-Hệ thống sử dụng 2 bảng chính trong cơ sở dữ liệu PostgreSQL:
-
-#### 1. Bảng `jobs` (Quản lý vòng đời yêu cầu):
-```sql
-CREATE TABLE jobs (
-    id UUID PRIMARY KEY,
-    status VARCHAR(20) NOT NULL DEFAULT 'processing',
-    input JSONB NOT NULL,
-    result JSONB NULL,
-    error TEXT NULL,
-    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
-);
-CREATE INDEX ix_jobs_status ON jobs (status);
-```
-- Mapping trạng thái: Trạng thái trong DB là `processing`, `succeeded`, `failed`. Tầng API chuyển đổi tương ứng thành `PROCESSING`, `FINISHED`, `FAILED` cho Client.
-
-#### 2. Bảng `result_cache` (Lưu trữ đệm kết quả trích xuất):
-```sql
-CREATE TABLE result_cache (
-    cache_key VARCHAR(64) PRIMARY KEY,
-    data_list JSONB NOT NULL,
-    result JSONB NOT NULL,
-    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
-);
-```
-
----
-
-### 4.2. Công thức sinh Cache Key (`_compute_cache_key`)
-
-Để đảm bảo tính toàn vẹn và độc lập dữ liệu, Cache Key được tính toán theo thuật toán băm chuẩn hóa:
-```python
-def _compute_cache_key(file_ids: list[str], file_hashes: list[str], data_list: list[dict]) -> str:
-    canonical = json.dumps(
-        {
-            "file_ids": file_ids,
-            "file_hashes": file_hashes,  # SHA-256 từng file binary PDF
-            "data_list": data_list,      # Danh sách kiến nghị cử tri
-        },
-        ensure_ascii=False,
-        sort_keys=True,
-    )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-```
-*Đặc tính:* Nếu cùng một bộ file PDF và cùng danh sách kiến nghị cử tri được gửi lên (kể cả khi đổi thứ tự key JSON), `cache_key` vẫn giữ nguyên giá trị, cho phép tái sử dụng kết quả ngay lập tức.
-
----
-
-### 4.3. Cấu hình Celery & RabbitMQ (`tasks.py`, `worker.sh`)
-
-| Tham số | Giá trị | Giải thích lý do thiết lập |
+| Biến môi trường | Giá trị mặc định | Giải thích chức năng |
 | :--- | :--- | :--- |
-| `task_default_queue` | `"answer_matching"` | Định tuyến task vào đúng hàng đợi riêng biệt, tách biệt khỏi các queue OCR hệ thống. |
-| `--pool=threads -c 4` | Thread Pool (4 threads) | Giúp Worker duy trì nhịp tim AMQP (`heartbeat`) liên tục với RabbitMQ khi các tác vụ I/O mạng (OCR, vLLM) chạy lâu. Tránh lỗi timeout ngắt kết nối gặp phải ở chế độ solo/prefork. |
-| `worker_prefetch_multiplier` | `1` | Mỗi worker thread chỉ lấy đúng 1 task tại một thời điểm, không prefetch dồn task nặng vào RAM. |
-| `task_acks_late` | `True` | Message chỉ được xác nhận hoàn tất (ACK) sau khi task thực thi xong thành công hoặc đã lưu lỗi vào DB. Nếu worker đột ngột dừng giữa chừng, task không bị biến mất. |
+| `RABBITMQ_URL` | `amqp://platform_developer:Project2026%21@10.0.11.184:5673/%2Fshared` | Chuỗi kết nối tới RabbitMQ Broker tập trung. |
+| `OCR_URL` | `http://localhost:8085/v1/ocr/documents` | Endpoint nhận diện toàn trang, trả về Canonical Tree JSON. |
+| `OCR_RENDER_URL` | `http://localhost:8085/v1/ocr/render` | Endpoint tái cấu trúc Canonical JSON thành Markdown chuẩn. |
+| `OCR_TIMEOUT` | `600.0` (giây) | Thời gian chờ tối đa cho bước nhận diện tài liệu OCR (10 phút). |
+| `OCR_RENDER_TIMEOUT`| `60.0` (giây) | Thời gian chờ tối đa cho bước render Markdown (1 phút). |
+| `MAX_CONCURRENCY` | `4` | Số lượng file PDF được gọi OCR song song tối đa trong 1 job. |
+| `LLM_BASE_URL` | `http://127.0.0.1:4000/v1` | Cổng Gateway LiteLLM phục vụ mô hình ngôn ngữ lớn. |
+| `LLM_MODEL_NAME` | `google/gemma-4-26B-A4B-it` | Mô hình ngôn ngữ lớn dùng cho Fallback Semantic Chunking. |
+| `LLM_TIMEOUT` | `300.0` (giây) | Thời gian chờ tối đa cho một request suy luận LLM (5 phút). |
+| `LLM_CONCURRENCY` | `1` | Semaphore kiểm soát luồng gọi LLM, bảo vệ bộ nhớ VRAM GPU. |
+| `ENABLE_MINISTRY_ROUTER`| `True` | Bật tính năng định tuyến trích xuất chuyên biệt theo Bộ. |
 
 ---
 
-### 4.4. Ma trận mã lỗi và xử lý ngoại lệ (Exception Handling Matrix)
+### 4.2. Cơ chế Đa luồng Celery Worker (`--pool=threads -c 4`)
 
-| Tình huống lỗi | Vị trí phát hiện | HTTP Status / Hành động | Chi tiết xử lý |
-| :--- | :--- | :--- | :--- |
-| **JSON Form-data sai cú pháp** | `schemas.py` | HTTP `400 Bad Request` | Tự động làm sạch BOM, chuyển smart-quotes, unwrap JSON lồng nhau; nếu vẫn sai ném `RequestParseError`. |
-| **Lệch số lượng `file_ids` và `files`** | `extract_api_server.py` | HTTP `400 Bad Request` | Kiểm tra `len(file_ids) != len(files)` trước khi ghi disk. |
-| **File không phải PDF** | `extract_api_server.py` | HTTP `415 Unsupported Media` | Kiểm tra đuôi file `.pdf` và `content-type: application/pdf`. |
-| **File vượt quá dung lượng** | `extract_api_server.py` | HTTP `413 Payload Too Large` | Kiểm tra dung lượng từng file `<= 50MB` (`MAX_FILE_SIZE_MB`). |
-| **PostgreSQL gián đoạn** | API Startup / POST | HTTP `503 Service Unavailable` | Startup chỉ cảnh báo (không crash app để vẫn mở được Swagger); POST bắt lỗi ném 503 và dọn dẹp file rác trên disk. |
-| **RabbitMQ gián đoạn** | `extract_api_server.py` | HTTP `503 Service Unavailable` | Bắt `OperationalError`, cập nhật job thành `failed` trên DB để không bị treo vĩnh viễn ở `processing`. |
-| **OCR bảng không hỗ trợ (400)** | `pipeline.py` | Đánh dấu Job `failed` | Bắt HTTP 4xx ném `NonRetryableOCRError`, dừng ngay lập tức không retry. |
-| **OCR Timeout / Server 5xx** | `pipeline.py` | Thử lại tối đa 5 lần | Chờ theo công thức Exponential Backoff: $\text{delay} = 1 \times 2^{\text{attempt}-1} + \text{jitter}$ (tối đa 5 lần). |
-| **LLM Output sai JSON** | `llm_chunking.py` | Thử lại tối đa 3 lần | Trích xuất JSON bằng `_extract_outer_json`, thêm gợi ý lỗi `hint` vào prompt và gọi lại vLLM. |
+Cơ chế phân phối và duy trì nhịp tim kết nối của Worker:
+
+```
+[ RabbitMQ Broker (Port 5673) ]
+        │
+        │ (1) Duy trì kết nối TCP & AMQP Heartbeat 30s/lần
+        ▼
+┌────────────────────────────────────────────────────────┐
+│  Celery Worker Process                                 │
+│                                                        │
+│  [ Luồng chính (Consumer Event Loop) ]                 │
+│         │                                              │
+│         │ (2) Đẩy task nhận được vào RAM                │
+│         ▼                                              │
+│  ┌────────────────────────────────────────┐            │
+│  │   Hàng đợi bộ nhớ đệm (Internal Queue) │            │
+│  │   [ Task D ]  [ Task C ]  [ Task B ]   │            │
+│  └───────────────────┬────────────────────┘            │
+│                      │                                 │
+│                      │ (3) Work-stealing: Thread nào rảnh bốc việc ngay
+│       ┌──────────────┼──────────────┬─────────────┐    │
+│       ▼              ▼              ▼             ▼    │
+│  [ Thread 1 ]   [ Thread 2 ]   [ Thread 3 ]  [ Thread 4]│
+│  (Đang chạy)    (Đang chạy)       (RẢNH)     (Đang chạy)│
+│                                     │                  │
+│                                     ▼                  │
+│                                Nhận Task B!            │
+└────────────────────────────────────────────────────────┘
+```
+
+- **Chống đứt kết nối (Missed Heartbeat):** Luồng chính (Main Thread) chạy vòng lặp sự kiện mạng độc lập, liên tục gửi bản tin Heartbeat định kỳ 30 giây lên RabbitMQ, giải quyết dứt điểm lỗi `Socket was disconnected` thường gặp ở chế độ `-P solo`.
+- **Cạnh tranh công bằng (Work-stealing):** 4 worker thread tự do lấy task từ hàng đợi RAM ngay khi vừa hoàn thành tác vụ trước đó, tối ưu hóa công suất xử lý I/O.
+- **Kiểm soát tải (`prefetch_multiplier = 1`):** Không cho phép kéo ồ ạt task nặng về chiếm dụng bộ nhớ RAM.
 
 ---
 
-## 5. TỔNG KẾT CÁC ĐIỂM BẢO VỆ & NÂNG CẤP ĐÃ ĐẠT ĐƯỢC
+## 5. TỔNG KẾT CÁC NÂNG CẤP VÀ ĐIỂM BẢO VỆ CỐT LÕI
 
-1. **Khắc phục triệt để sự cố OCR Server:** Chuyển `use_celery: "false"` cho phép Surya OCR xử lý trực tiếp in-process, không phụ thuộc vào Celery result store của server OCR.
-2. **Cơ chế Fail-Fast chống nghẽn queue:** Phân tách rõ lỗi nghiệp vụ 4xx (`NonRetryableOCRError`) và lỗi tạm thời 5xx (`RETRYABLE_CODES`), giúp hệ thống giải phóng worker ngay lập tức khi gặp tài liệu lỗi thay vì retry vô ích 25 phút.
-3. **Chống rớt AMQP Heartbeat:** Khởi chạy Celery Worker với `--pool=threads -c 4` giúp duy trì kết nối bền vững với RabbitMQ kể cả khi pipeline xử lý các file văn bản dung lượng lớn.
-4. **Bảo toàn bộ nhớ RAM:** `worker_prefetch_multiplier = 1` và `task_acks_late = True` loại bỏ hiện tượng tràn bộ nhớ khi lưu lượng gửi file tăng đột biến.
-5. **Cơ chế Double-check Cache:** Kiểm tra Cache ở cả tầng API Tiếp nhận lẫn tầng Worker Tiêu thụ, ngăn chặn hoàn toàn hiện tượng xử lý trùng lặp khi nhiều người dùng gửi cùng dữ liệu đồng thời.
+1. **Chuẩn hóa Standalone OCR 2 giai đoạn:** Tách biệt rõ ràng giai đoạn trích xuất cây cấu trúc (`/v1/ocr/documents` - Canonical Tree JSON v1.0.0) và giai đoạn hiển thị (`/v1/ocr/render` - Markdown có cấu trúc). Tự động fallback về text thuần nếu render gặp sự cố, đảm bảo pipeline không bao giờ bị gián đoạn.
+2. **Hệ thống định tuyến theo Bộ (Ministry Router):** Nâng cao tỷ lệ bóc tách chính xác bằng cách nhận diện tự động và áp dụng bộ regex riêng biệt cho từng cơ quan ban hành, đồng thời bóc tách thành công mã định danh Đoàn ĐBQH (`donvi_id`).
+3. **Cơ chế Điều tiết Tải Song song (Dual Semaphore Control):**
+   - `MAX_CONCURRENCY = 4`: Cho phép mở rộng song song 4 luồng OCR để tăng tốc độ xử lý tài liệu.
+   - `LLM_CONCURRENCY = 1`: Hãm tải nghiêm ngặt các lượt gọi LLM Fallback, bảo vệ GPU tránh tình trạng tranh chấp và tràn bộ nhớ VRAM.
+4. **Kiến trúc Celery Worker Đa luồng Bền vững:** Sử dụng `--pool=threads -c 4` tách biệt hoàn toàn việc truyền thông mạng AMQP và xử lý tính toán, đảm bảo kết nối với RabbitMQ luôn thông suốt, loại bỏ hoàn toàn hiện tượng task bị redeliver lặp đi lặp lại.
+5. **Cơ chế Fail-Fast & Double-check Cache:** Cô lập ngay lập tức các file lỗi cấu trúc 4xx (`NonRetryableOCRError`), ngăn chặn retry lãng phí, đồng thời bảo vệ hệ thống khỏi các request trùng lặp nhờ cơ chế kiểm tra cache hai lớp.
