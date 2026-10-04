@@ -489,7 +489,7 @@ def _extract_signer(md_text: str) -> str:
     return ""
 
 
-def _extract_llm(md_text: str) -> list:
+def _extract_llm(md_text: str, filename: str | None = None) -> list:
     """Fallback LLM cho file classify "llm": tach petition bang llm_chunking.
 
     - Map cap theo THU TU kien_nghi[i] <-> tra_loi[i] (cat o min length),
@@ -500,7 +500,7 @@ def _extract_llm(md_text: str) -> list:
     """
     try:
         from llm_chunking import extract_from_md_sync
-        res = extract_from_md_sync(md_text, max_tries=2) or {}
+        res = extract_from_md_sync(md_text, file_name=filename or "document", max_tries=2) or {}
         pairs = []
         for kn, tl in zip(res.get("kien_nghi", []), res.get("tra_loi", [])):
             if not kn.strip() or not tl.strip():

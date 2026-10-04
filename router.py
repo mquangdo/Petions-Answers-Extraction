@@ -281,7 +281,7 @@ async def route_extract(
 
     try:
         # Module là sync -> chạy trong thread để không block event loop.
-        petitions = await asyncio.to_thread(fn.extract_petitions, md_text)
+        petitions = await asyncio.to_thread(fn.extract_petitions, md_text, filename)
     except Exception as e:
         logger.warning(f"{tag}module {code} lỗi extract ({e}) -> trả rỗng")
         return _empty_result(ministry, code)

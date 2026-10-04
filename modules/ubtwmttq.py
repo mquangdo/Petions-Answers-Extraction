@@ -262,7 +262,7 @@ def _extract_f2(md_text: str) -> list:
     return petitions
 
 
-def extract_petitions(md_text: str) -> list:
+def extract_petitions(md_text: str, filename: str | None = None) -> list:
     """
     Router: xác định format rồi route đến handler.
     Trả về danh sách {"noi_dung", "tra_loi"}.
@@ -273,7 +273,7 @@ def extract_petitions(md_text: str) -> list:
         return _extract_f1(md_text)
     if fmt == "f2":
         return _extract_f2(md_text)
-    return _extract_llm(md_text)
+    return _extract_llm(md_text, filename)
 
 
 def extract_metadata(md_text: str) -> dict:
