@@ -135,7 +135,7 @@ logger = get_logger("llm", "pipeline.log")
 client = AsyncOpenAI(base_url=LLM_BASE_URL, api_key=LLM_API_KEY)
 MODEL_NAME = LLM_MODEL_NAME
 _LLM_TIMEOUT = LLM_TIMEOUT
-MAX_RETRIES = 3
+MAX_RETRIES = 2
 
 # ---------------------------------------------------------------------------
 # Atomic unit segmentation (sao từ modules/chunking_utils.py)
@@ -333,7 +333,7 @@ def build_messages(units: list[Unit], system_prompt: str, hint: str | None = Non
 
 
 async def _call_llm(units: list[Unit], system_prompt: str,
-                    hint: str | None = None, max_retries: int = 3) -> str:
+                    hint: str | None = None, max_retries: int = 2) -> str:
     count = 0
     while count < max_retries:
         try:
@@ -502,7 +502,7 @@ def build_output(file_name: str, units: list[Unit], kn_groups: list[list[str]],
     }
 
 
-async def extract_from_md(markdown: str, file_name: str = "document", max_tries: int = 3) -> dict:
+async def extract_from_md(markdown: str, file_name: str = "document", max_tries: int = 1) -> dict:
     """Chạy pipeline v3: segment + 2 LLM call + validate + cân bằng KN==TL."""
     units = segment_units_simple(markdown)
 

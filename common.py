@@ -32,6 +32,7 @@ import re
 import sys
 import time
 from pathlib import Path
+from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_NAME
 
 from markdown_it import MarkdownIt
 
@@ -428,7 +429,7 @@ def _clean_text(text: str) -> str:
 
 def _extract_signer(md_text: str) -> str:
     """
-    Trích xuất chức vụ và tên người ký từ 20 dòng cuối văn bản bằng model Qwen3 (localhost:8000).
+    Trích xuất chức vụ và tên người ký từ 20 dòng cuối văn bản bằng model LLM.
     - Có chức vụ + tên -> '<Chức vụ> <Tên>'
     - Không có chức vụ -> '<Tên>'
     - Không có tên / lỗi -> ''
@@ -441,9 +442,9 @@ def _extract_signer(md_text: str) -> str:
     if not tail_text:
         return ""
 
-    url = "https://8000--main--dev--sinhnq3.coder.vts-ai.space/v1/chat/completions"
+    url = "http://localhost:4000/v1/chat/completions"
     payload = {
-        "model": "Qwen/Qwen3-4B-Instruct-2507",
+        "model": "google/gemma-4-26B-A4B-it",
         "messages": [
             {
                 "role": "system",
@@ -451,8 +452,8 @@ def _extract_signer(md_text: str) -> str:
                     "Bạn là trợ lý trích xuất thông tin văn bản hành chính Việt Nam. "
                     "Nhiệm vụ: Tìm người ký văn bản ở các dòng cuối.\n"
                     "Quy tắc:\n"
-                    "1. Nếu có cả Chức vụ và Họ tên: Trả về '<Chức vụ> <Họ tên>'.\n"
-                    "2. Nếu có họ tên người ký nhưng không có chức vụ: Trả về nguyên '<Họ tên>'.\n"
+                    "1. Nếu có cả Chức vụ và Họ tên: Trả về 'Chức vụ Họ tên'. Tuyệt đối không thêm dấu thừa.\n"
+                    "2. Nếu có họ tên người ký nhưng không có chức vụ: Trả về nguyên 'Họ tên'. Tuyệt đối không thêm dấu thừa.\n"
                     "3. Chỉ trả về 'NONE' khi hoàn toàn không có tên người nào ở phần ký.\n"
                     "4. Tuyệt đối không giải thích."
                 ),
@@ -468,8 +469,14 @@ def _extract_signer(md_text: str) -> str:
 
     try:
         import httpx
+
+        headers = {
+            "Authorization": f"Bearer {LLM_API_KEY}",
+            "Content-Type": "application/json",
+        }
+        
         with httpx.Client(timeout=5.0) as client:
-            res = client.post(url, json=payload)
+            res = client.post(url, json=payload, headers=headers)
             if res.status_code == 200:
                 content = res.json()["choices"][0]["message"]["content"].strip()
                 content = content.strip("'\"").strip()

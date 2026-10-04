@@ -41,11 +41,11 @@ OCR_URL = "http://localhost:8085/v1/ocr/documents"
 RENDER_URL = "http://localhost:8085/v1/ocr/render"
 
 JITTER = 1.0
-MAX_RETRIES = 5
+MAX_RETRIES = 3
 RETRY_BACKOFF_BASE = 3
 RETRYABLE_CODES = {429, 500, 502, 503, 504}
 DEFAULT_CONCURRENCY = 4
-OCR_TIMEOUT = 300
+OCR_TIMEOUT = 60
 RENDER_TIMEOUT = 60      # giây; render không chạy lại OCR nên nhanh
 RENDER_MAX_RETRIES = 3   # số lần thử lại cho bước render
 
@@ -86,7 +86,7 @@ async def _ocr_pdf_async(
                     f"HTTP {response.status_code} (có thể bị chặn/quá tải)"
                 )
             if response.status_code >= 400:
-                raise RuntimeError(response.text)
+                raise RuntimeError(f"HTTP {response.status_code}: {response.text}")
 
             result = response.json()
             if not isinstance(result, dict) or "content" not in result:
@@ -102,7 +102,7 @@ async def _ocr_pdf_async(
             wait = RETRY_BACKOFF_BASE * (2 ** (attempt - 1)) + random.uniform(0, JITTER)
             print(
                 f"  [{filename}] Retry {attempt}/{MAX_RETRIES - 1} sau {wait:.1f}s "
-                f"(lỗi: {e})"
+                f"(lỗi: {type(e).__name__}: {e})"
             )
             await asyncio.sleep(wait)
 
@@ -148,7 +148,7 @@ async def _render_markdown_async(
                     f"HTTP {response.status_code} (có thể bị chặn/quá tải)"
                 )
             if response.status_code >= 400:
-                raise RuntimeError(response.text)
+                raise RuntimeError(f"HTTP {response.status_code}: {response.text}")
 
             result = response.json()
             text = result.get("content") or ""
@@ -163,7 +163,7 @@ async def _render_markdown_async(
             wait = RETRY_BACKOFF_BASE * (2 ** (attempt - 1)) + random.uniform(0, JITTER)
             print(
                 f"  [{filename}] Render retry {attempt}/{RENDER_MAX_RETRIES - 1} "
-                f"sau {wait:.1f}s (lỗi: {e})"
+                f"sau {wait:.1f}s (lỗi: {type(e).__name__}: {e})"
             )
             await asyncio.sleep(wait)
 
