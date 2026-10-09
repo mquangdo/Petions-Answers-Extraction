@@ -442,47 +442,57 @@ def _extract_signer(md_text: str) -> str:
     if not tail_text:
         return ""
 
-    url = "http://localhost:4000/v1/chat/completions"
-    payload = {
-        "model": "google/gemma-4-26B-A4B-it",
-        "messages": [
-            {
-                "role": "system",
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(
+            base_url=LLM_BASE_URL,
+            api_key=LLM_API_KEY,
+            max_retries=0,
+            timeout=5.0,
+        )
+        resp = client.chat.completions.create(
+            model=LLM_MODEL_NAME,
+            temperature=0,
+            max_tokens=50,
+            messages=[
+                {
+                    "role": "system",
                 "content": (
                     "Bạn là trợ lý trích xuất thông tin văn bản hành chính Việt Nam. "
-                    "Nhiệm vụ: Tìm người ký văn bản ở các dòng cuối.\n"
-                    "Quy tắc:\n"
-                    "1. Nếu có cả Chức vụ và Họ tên: Trả về 'Chức vụ Họ tên'. Tuyệt đối không thêm dấu thừa.\n"
-                    "2. Nếu có họ tên người ký nhưng không có chức vụ: Trả về nguyên 'Họ tên'. Tuyệt đối không thêm dấu thừa.\n"
-                    "3. Chỉ trả về 'NONE' khi hoàn toàn không có tên người nào ở phần ký.\n"
-                    "4. Tuyệt đối không giải thích."
+                    "Mục tiêu: lấy ra Chức danh + Tên người ký ở các dòng cuối, vd: \"Bộ trưởng Nguyễn Văn A\".\n"
+                    "1. Xác định được tên và chức danh -> trả \"<Chức danh> <Tên>\", vd: \"Bộ trưởng Nguyễn Văn A\", \"Thứ trưởng Nguyễn Thị B\". Chức danh viết hoa chữ cái đầu từ đầu tiên, các từ sau viết thường. Họ tên viết hoa chữ cái đầu mỗi từ, giữ nguyên dấu.\n"
+                    "2. Xác định được tên nhưng không xác định được chức danh -> chỉ trả \"<Tên>\". Tuyệt đối không bịa chức danh.\n"
+                    "3. Không xác định được tên -> trả \"NONE\". Tuyệt đối không đoán bừa.\n"
+                    "4. Tên cơ quan, tổ chức (Bộ, Văn phòng, Ủy ban...) KHÔNG phải tên người. Chỉ thấy tên cơ quan mà không thấy tên người nào -> \"NONE\".\n"
+                    "5. Nhiều tên cùng xuất hiện: chỉ giữ TÊN ĐẦY ĐỦ, ĐÚNG CHÍNH TẢ nhất, bất kể thứ tự xuất hiện (tên ngắn cụt là tập con của tên dài thì lấy tên dài; không mặc định lấy tên đầu tiên). Từ 2 tên KHÁC HẲN nhau trở lên mà không xác định được đâu là người ký -> \"NONE\".\n"
+                    "Kết quả trả về nguyên văn, tuyệt đối không thêm dấu má gì cả.\n"
+                    "Ví dụ:\n"
+                    "Input:\nBỘ TRƯỞNG\n\nNguyễn Văn A\n"
+                    "Output:\nBộ trưởng Nguyễn Văn A\n"
+                    "Input:\n*Nguyễn Thị B*\n"
+                    "Output:\nNguyễn Thị B\n"
+                    "Input:\nNơi nhận:\n- Như trên;\n"
+                    "Output:\nNONE\n"
+                    "Input:\n...Bộ trưởng Bộ Tài chính đã ban hành Quyết định số 10...\n"
+                    "Output:\nNONE\n"
+                    "Input:\nBỘ TRƯỞNG\n\nNguyễn V An\n\nNguyễn Văn An\n"
+                    "Output:\nBộ trưởng Nguyễn Văn An\n"
+                    "Input:\nBỘ TRƯỞNG\n\nNguyễn Văn A\n\nTrần Văn Bình\n"
+                    "Output:\nNONE"
                 ),
-            },
-            {
-                "role": "user",
-                "content": f"Dưới đây là 20 dòng cuối của văn bản:\n```\n{tail_text}\n```\nHọ tên người ký:",
-            },
-        ],
-        "temperature": 0,
-        "max_tokens": 50,
-    }
-
-    try:
-        import httpx
-
-        headers = {
-            "Authorization": f"Bearer {LLM_API_KEY}",
-            "Content-Type": "application/json",
-        }
-        
-        with httpx.Client(timeout=5.0) as client:
-            res = client.post(url, json=payload, headers=headers)
-            if res.status_code == 200:
-                content = res.json()["choices"][0]["message"]["content"].strip()
-                content = content.strip("'\"").strip()
-                if content.upper() == "NONE" or len(content) > 60:
-                    return ""
-                return content
+                },
+                {
+                    "role": "user",
+                    "content": f"Dưới đây là 20 dòng cuối của văn bản:\n```\n{tail_text}\n```\nHọ tên người ký:",
+                },
+            ],
+        )
+        content = resp.choices[0].message.content.strip()
+        content = content.strip("'\"").strip()
+        if content.upper() == "NONE" or len(content) > 60:
+            return ""
+        return content
     except Exception:
         return ""
 
